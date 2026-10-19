@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.voiceos.app.music</string>
+    <key>CFBundleName</key>
+    <string>VoiceOS Music</string>
+    <key>CFBundleDisplayName</key>
+    <string>VoiceOS Music</string>
+    <key>CFBundleExecutable</key>
+    <string>apple-music-helper</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>VoiceOSMusic.icns</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSAppleMusicUsageDescription</key>
+    <string>VoiceOS plays the music you request and accesses your playlists and favorites.</string>
+    <key>ElectronAsarIntegrity</key>
+    <dict>
+      <key>Resources/app.asar</key>
+      <dict>
+        <key>algorithm</key>
+        <string>SHA256</string>
+        <key>hash</key>
+        <string>72b3cb3db419a1d173f74e546b69e03972c9713b9057f362a8bef971570af3a7</string>
+      </dict>
+    </dict>
+  </dict>
+</plist>

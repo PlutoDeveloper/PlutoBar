@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+scripts/dev/.claude-stream.jsonl
+resources/src/plutobar/.build/

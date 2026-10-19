@@ -1,0 +1,155 @@
+{
+  "name": "voiceos-opensourced",
+  "productName": "VoiceOS opensourced",
+  "version": "0.1.33",
+  "description": "VoiceOS \u2014 a voice-first macOS assistant with on-device speech and Claude",
+  "main": "./src/main/main.js",
+  "license": "MIT",
+  "author": {
+    "name": "Mithun Productions"
+  },
+  "scripts": {
+    "dev": "electron .",
+    "app": "scripts/package-app.sh --open",
+    "dist": "scripts/package-app.sh --dmg",
+    "build:whisper": "scripts/build-whisper.sh",
+    "build:ui-control": "scripts/build-ui-control.sh",
+    "build:plutobar": "scripts/build-plutobar.sh",
+    "test": "node scripts/dev/backend-harness.js"
+  },
+  "build": {
+    "appId": "com.voiceos.opensourced",
+    "productName": "VoiceOS opensourced",
+    "directories": {
+      "output": "dist",
+      "buildResources": "resources/build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/.DS_Store"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/bin",
+        "to": "binaries"
+      },
+      {
+        "from": "resources/native",
+        "to": "native"
+      },
+      {
+        "from": "resources/VoiceOS Music.app",
+        "to": "VoiceOS Music.app"
+      },
+      {
+        "from": "resources/plutobar",
+        "to": "plutobar"
+      },
+      {
+        "from": "resources/build",
+        "to": "build",
+        "filter": [
+          "logoTemplate*.png"
+        ]
+      }
+    ],
+    "mac": {
+      "icon": "resources/build/icon.icns",
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg"
+      ],
+      "hardenedRuntime": true,
+      "entitlements": "resources/build/entitlements.mac.plist",
+      "entitlementsInherit": "resources/build/entitlements.mac.plist",
+      "extendInfo": {
+        "LSUIElement": false,
+        "NSMicrophoneUsageDescription": "VoiceOS listens while you hold the voice shortcut so it can transcribe your speech.",
+        "NSAppleEventsUsageDescription": "VoiceOS controls apps you ask it to, such as opening apps or playing music.",
+        "NSCalendarsFullAccessUsageDescription": "VoiceOS reads and creates calendar events when you ask it to.",
+        "NSRemindersFullAccessUsageDescription": "VoiceOS reads and creates reminders when you ask it to.",
+        "NSLocationWhenInUseUsageDescription": "VoiceOS uses your location for weather and nearby places when you ask.",
+        "NSAppleMusicUsageDescription": "VoiceOS plays, searches and saves music in Apple Music when you ask it to."
+      }
+    },
+    "asar": false,
+    "protocols": [
+      {
+        "name": "VoiceOS",
+        "schemes": [
+          "voiceos"
+        ]
+      }
+    ]
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  },
+  "trustedDependencies": [
+    "@sentry/cli",
+    "electron",
+    "esbuild",
+    "node-mac-permissions",
+    "sqlite3"
+  ],
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.129.0",
+    "@bufbuild/protobuf": "^2.6.0",
+    "@connectrpc/connect": "^2.0.2",
+    "@connectrpc/connect-node": "^2.0.2",
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0",
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@sentry/electron": "^7.13.0",
+    "@supabase/supabase-js": "^2.75.0",
+    "@tiptap/extension-highlight": "^3.20.5",
+    "@tiptap/extension-list-keymap": "^3.20.5",
+    "@tiptap/extension-underline": "^3.20.5",
+    "@tiptap/react": "^3.20.5",
+    "@tiptap/starter-kit": "^3.20.5",
+    "ajv": "^8.17.1",
+    "canvas-confetti": "^1.9.4",
+    "compromise": "^14.14.4",
+    "dotenv": "^17.0.1",
+    "electron-log": "^5.4.1",
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.6.2",
+    "fast-deep-equal": "^3.1.3",
+    "fast-uri": "^3.1.0",
+    "fflate": "^0.8.2",
+    "http-proxy-agent": "^7.0.2",
+    "https-proxy-agent": "^7.0.6",
+    "json-schema-traverse": "^1.0.0",
+    "jwt-decode": "^4.0.0",
+    "katex": "^0.16.45",
+    "kokoro-js": "^1.2.1",
+    "marked": "^17.0.5",
+    "node-emoji": "^2.2.0",
+    "node-mac-permissions": "^2.5.0",
+    "node-machine-id": "^1.1.12",
+    "pdf-parse": "^2.4.5",
+    "posthog-node": "^5.52.1",
+    "psl": "^1.15.0",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-breaks": "^4.0.0",
+    "remark-cjk-friendly": "^2.3.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "require-from-string": "^2.0.2",
+    "sqlite3": "^5.1.7",
+    "turndown": "^7.2.2",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}
