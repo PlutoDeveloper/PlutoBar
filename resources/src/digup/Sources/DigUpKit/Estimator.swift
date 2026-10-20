@@ -87,7 +87,9 @@ public enum Estimator {
                     estimate.laterSeconds += Double(all - first) * costs.pdfPage
                 }
             case .doc:
-                let all = max(1, min(options.maxChunks, Int(file.size / 2000)))
+                // [PlutoBar] A deck's size is mostly pictures: about a slide per 150 KB, at most 60.
+                let deck = SlidesExtractor.extensions.contains((file.path as NSString).pathExtension.lowercased())
+                let all = max(1, min(options.maxChunks, deck ? min(60, Int(file.size / 150_000) + 1) : Int(file.size / 2000)))
                 let first = min(all, options.docStep)
                 estimate.docChunks += first
                 estimate.seconds += Double(first) * costs.docChunk

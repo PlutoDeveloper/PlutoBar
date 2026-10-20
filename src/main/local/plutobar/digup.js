@@ -527,8 +527,12 @@ function clock(seconds) {
 }
 
 // Where in the file the match is, as DigUp's CLI says it.
+// PowerPoint decks: a chunk is a slide (resources/src/digup Slides.swift).
+const isDeck = (p) => /\.(pptx|ppsx|potx|pptm)$/i.test(p || "");
+
 function where(hit) {
   const loc = hit.loc;
+  if (hit.segment === "chunk" && isDeck(hit.path)) return loc != null ? "slide " + Math.round(loc) : "";
   switch (hit.segment) {
     case "page":
     case "pageImage":
@@ -547,7 +551,7 @@ function where(hit) {
   }
 }
 
-const KIND_LABEL = { screenshot: "Screenshot", image: "Picture", pdf: "PDF", doc: "Document", audio: "Recording", video: "Video" };
+const KIND_LABEL = { screenshot: "Screenshot", image: "Picture", pdf: "PDF", doc: "Document", audio: "Recording", video: "Video", deck: "Presentation" };
 
 function excerpt(hit) {
   const e = String(hit.excerpt || "").replace(/[«»]/g, "").replace(/\s+/g, " ").trim();
@@ -560,7 +564,7 @@ function toItem(hit, { code = false } = {}) {
   const name = path.basename(hit.path);
   const ex = excerpt(hit);
   const picture = ["image", "screenshot"].includes(hit.kind);
-  const subtitle = ex || [KIND_LABEL[hit.kind] || (code ? "Code" : "File"), tilde(path.dirname(hit.path))].join(" · ");
+  const subtitle = ex || [KIND_LABEL[isDeck(hit.path) ? "deck" : hit.kind] || (code ? "Code" : "File"), tilde(path.dirname(hit.path))].join(" · ");
   return {
     id: "file:" + (code ? "c" : "") + hit.segment_id,
     kind: "file",
@@ -608,6 +612,22 @@ function openHit(hit, { shell, code = false }) {
       "end tell",
     ].join("\n");
     execFile("osascript", ["-e", script], (err) => err && shell.openPath(hit.path));
+    return;
+  }
+  // A deck at its slide: PowerPoint if it's here, else Keynote (which opens pptx too).
+  if (isDeck(hit.path) && hit.segment === "chunk" && Number.isFinite(loc) && loc > 1) {
+    const slide = Math.round(loc);
+    const script = fs.existsSync("/Applications/Microsoft PowerPoint.app")
+      ? ['tell application "Microsoft PowerPoint"', "activate", "open POSIX file " + q(hit.path), "delay 1.5",
+          "go to slide (view of document window 1) number " + slide, "end tell"].join("\n")
+      : ['tell application "Keynote"', "activate", "set d to open POSIX file " + q(hit.path), "delay 1",
+          "set current slide of d to slide " + slide + " of d", "end tell"].join("\n");
+    execFile("osascript", ["-e", script], (err) => {
+      if (err) {
+        log.warn("[Search] couldn't open at slide " + slide + ": " + String(err.message).slice(0, 160));
+        shell.openPath(hit.path);
+      }
+    });
     return;
   }
   if (code && Number.isFinite(loc)) {

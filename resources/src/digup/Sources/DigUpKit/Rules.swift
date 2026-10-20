@@ -21,7 +21,8 @@ public enum Rules {
     ]
     static let projectBundleExtensions: Set<String> = ["xcodeproj", "xcworkspace"]
 
-    static let docExtensions: Set<String> = ["txt", "text", "md", "markdown", "rtf", "docx", "doc", "odt", "html", "htm"]
+    static let docExtensions: Set<String> = Set(["txt", "text", "md", "markdown", "rtf", "docx", "doc", "odt", "html", "htm"])
+        .union(SlidesExtractor.extensions)   // [PlutoBar] PowerPoint decks, a chunk per slide (Slides.swift)
 
     /// Source code and data files: off by default (your editor and ripgrep search them better, and they flood an index).
     static let codeExtensions: Set<String> = [

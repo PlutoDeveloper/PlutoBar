@@ -12,7 +12,7 @@ const TOOL = {
   name: "search_files",
   label: "Searching your files",
   description:
-    "Search the user's own files on this Mac by what's in them, not just their names: photos and screenshots (by what they show and the text in them), PDFs (by page), documents, recordings and videos (by moment), and, with a query starting 'code:', their code projects. Use it whenever the user refers to something in their files ('the lease', 'that screenshot with the payment error', 'the podcast where they talk about sleep', 'my notes on X'). Describe what to find in plain words. Returns the best matches with path, kind, page/moment and an excerpt; read=true adds the matched passage's text so you can answer from it. To open one for the user at its page or moment, call again with open_path (and at).",
+    "Search the user's own files on this Mac by what's in them, not just their names: photos and screenshots (by what they show and the text in them), PDFs (by page), documents, PowerPoint decks (by slide), recordings and videos (by moment), and, with a query starting 'code:', their code projects. Use it whenever the user refers to something in their files ('the lease', 'that screenshot with the payment error', 'the podcast where they talk about sleep', 'my notes on X'). Describe what to find in plain words. Returns the best matches with path, kind, page/moment and an excerpt; read=true adds the matched passage's text so you can answer from it. To open one for the user at its page or moment, call again with open_path (and at).",
   schema: {
     type: "object",
     properties: {

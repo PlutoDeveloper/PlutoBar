@@ -439,11 +439,14 @@ public final class Indexer {
                 prepared.payload = .pdf(pages: read.pages, read: wanted, total: read.total, title: read.title)
             case .doc:
                 // The chunks are cut the same way every time, so a later step goes on where the last one stopped.
-                let text = try DocExtractor.text(of: url)
-                let chunks = DocExtractor.chunks(text, limit: options.maxChunks + 1)
+                // [PlutoBar] A deck is read slide by slide: chunk n is slide n.
+                let deck = SlidesExtractor.isDeck(url)
+                let text = deck ? "" : try DocExtractor.text(of: url)
+                let chunks = deck ? Array(try SlidesExtractor.slides(of: url).prefix(options.maxChunks + 1))
+                    : DocExtractor.chunks(text, limit: options.maxChunks + 1)
                 let read = (job.step ?? 0..<options.docStep).clamped(to: 0..<min(chunks.count, options.maxChunks))
                 prepared.payload = .doc(chunks: Array(chunks[read]), read: read, total: chunks.count,
-                                        characters: text.count)
+                                        characters: deck ? chunks.reduce(0) { $0 + $1.count } : text.count)
             case .audio:
                 let (window, hop) = (options.audioWindow, options.audioHop)
                 let (pieces, duration) = try runBlocking {
