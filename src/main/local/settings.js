@@ -66,6 +66,25 @@ class Settings {
     };
   }
 
+  // The Agent voice, as Settings → Pluto sets it (the app's own setting keys).
+  setVoice({ enabled, id, speed }) {
+    const app = this.store.get(this.appSettingsKey) || {};
+    if (enabled !== undefined) app.agentVoiceEnabled = !!enabled;
+    if (id && AGENT_VOICES[id]) app.agentVoiceId = id;
+    if (speed !== undefined) app.agentVoiceSpeed = Number(speed);
+    this.store.set(this.appSettingsKey, app);
+    this.emit();
+  }
+
+  // Show in the Dock (the app's own setting).
+  showInDock() {
+    return (this.store.get(this.appSettingsKey) || {}).showInDock !== false;
+  }
+
+  setShowInDock(on) {
+    this.store.set(this.appSettingsKey, { ...(this.store.get(this.appSettingsKey) || {}), showInDock: !!on });
+  }
+
   onChange(fn) {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -155,7 +174,16 @@ class Settings {
 
   plutobar() {
     const p = (this.store.get(STORE_KEY) || {}).plutobar || {};
-    return { enabled: p.enabled !== false, shortcut: p.shortcut || null, clipboard: p.clipboard !== false, setupDone: p.setupDone === true };
+    return {
+      enabled: p.enabled !== false,
+      shortcut: p.shortcut || null,
+      clipboard: p.clipboard !== false,
+      setupDone: p.setupDone === true,
+      askFirst: p.askFirst !== false,
+      quickAnswers: p.quickAnswers !== false,
+      menuBarProgress: p.menuBarProgress !== false,
+      filesTool: p.filesTool !== false,
+    };
   }
 
   setPlutobar(patch) {
@@ -163,7 +191,16 @@ class Settings {
     const next = { ...this.plutobar(), ...patch };
     this.store.set(STORE_KEY, {
       ...raw,
-      plutobar: { enabled: !!next.enabled, shortcut: next.shortcut ? String(next.shortcut) : null, clipboard: !!next.clipboard, setupDone: !!next.setupDone },
+      plutobar: {
+        enabled: !!next.enabled,
+        shortcut: next.shortcut ? String(next.shortcut) : null,
+        clipboard: !!next.clipboard,
+        setupDone: !!next.setupDone,
+        askFirst: !!next.askFirst,
+        quickAnswers: !!next.quickAnswers,
+        menuBarProgress: !!next.menuBarProgress,
+        filesTool: !!next.filesTool,
+      },
     });
     this.emit();
     return this.plutobar();
@@ -175,7 +212,15 @@ class Settings {
   files() {
     const f = (this.store.get(STORE_KEY) || {}).files || {};
     const list = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
-    return { roots: list(f.roots), skipped: list(f.skipped), types: list(f.types), codeRoots: list(f.codeRoots), codeSkipped: list(f.codeSkipped), chosen: f.chosen === true };
+    return {
+      roots: list(f.roots),
+      skipped: list(f.skipped),
+      types: list(f.types),
+      codeRoots: list(f.codeRoots),
+      codeSkipped: list(f.codeSkipped),
+      chosen: f.chosen === true,
+      onBattery: f.onBattery === true,
+    };
   }
 
   setFiles(patch) {

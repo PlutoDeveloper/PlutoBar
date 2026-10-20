@@ -234,10 +234,12 @@ let watchTimer = null;
 let periodic = null;
 let started = false;
 
-const onPower = () => !electron.powerMonitor.isOnBatteryPower();
+let paused = false;
+// The first pass ("backfill") runs on power, or on battery too when that's chosen.
+const onPower = () => folders().onBattery === true || !electron.powerMonitor.isOnBatteryPower();
 
 function startIndexer() {
-  if (indexer || !binary()) return;
+  if (indexer || !binary() || paused) return;
   const f = folders();
   if (!f.roots.length && !f.codeRoots.length) return;
   const args = ["index-service", "--index", indexDir(), "--prune"];
@@ -485,6 +487,25 @@ function foldersChanged() {
   }
 }
 
+// Pause takes effect after the current batch (the indexer finishes it and exits).
+function setPaused(on) {
+  paused = !!on;
+  status.paused = paused;
+  if (paused) send("stop");
+  else requestSync();
+  changed();
+}
+
+// What's indexed under each folder (DigUp's per-folder counts).
+async function summaries(code = false) {
+  if (!service.available()) return [];
+  try {
+    return (await service.request("summaries", { code }, 8000)).roots || [];
+  } catch {
+    return [];
+  }
+}
+
 function stop() {
   for (const w of watchers) w.close();
   watchers = [];
@@ -609,6 +630,10 @@ module.exports = {
   start,
   stop,
   foldersChanged,
+  setPaused,
+  indexNow: () => requestSync(),
+  summaries,
+  isPaused: () => paused,
   downloadModel,
   importDigUp,
   candidates,

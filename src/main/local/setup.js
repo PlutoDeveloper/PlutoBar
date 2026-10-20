@@ -294,4 +294,4 @@ function codeCandidates() {
     .filter((p) => fs.existsSync(p));
 }
 
-module.exports = { init, show, handle, shortcutPressed, isOpen };
+module.exports = { init, show, handle, shortcutPressed, isOpen, codeCandidates };

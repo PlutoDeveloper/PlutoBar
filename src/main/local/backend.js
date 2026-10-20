@@ -323,7 +323,7 @@ class LocalVoiceOSClient {
     if (xConnected) addLocalTool(tools, { ...x.TOOL, run: (args) => x.run(args, { openUrl: (url) => require("electron").shell.openExternal(url), signal }) });
     addLocalTool(tools, { ...musicApp.TOOL, run: musicApp.run });
     // Always offered (a stable tool list keeps the prompt cache); without DigUp it says so.
-    addLocalTool(tools, { ...files.TOOL, run: files.run });
+    if (this.settings.plutobar?.().filesTool !== false) addLocalTool(tools, { ...files.TOOL, run: files.run });
     // Always offered (a tool list that changes between requests breaks the
     // prompt cache); without a screenshot it points to mac_look.
     const screen = screenImage(req);

@@ -24,6 +24,7 @@ const { pcm16ToWav } = require("./speech/transcribe");
 const agentEvents = require("./agentEvents");
 const plutobar = require("./plutobar");
 const setup = require("./setup");
+const settingsWindow = require("./settingsWindow");
 const fileSearch = require("./plutobar/digup");
 
 const log = require("./log");
@@ -127,7 +128,9 @@ function onReady(readyHooks = {}) {
     stopSpeaking: () => voiceClient?.stopSpeaking(),
     openSettings: () => openSettings("plutobar"),
     setup: (a) => setup.handle(a),
-    chooseFolders: () => setup.show({ step: 3 }),
+    settings: (a) => settingsWindow.handle(a),
+    prefs: () => settings.plutobar(),
+    chooseFolders: () => settingsWindow.show("search"),
   });
   setup.init({
     addon: () => plutobar.addon(),
@@ -149,6 +152,26 @@ function onReady(readyHooks = {}) {
     showBar: () => plutobar.show(),
   });
   plutobar.onShortcut(() => setup.shortcutPressed());
+  settingsWindow.init({
+    addon: () => plutobar.addon(),
+    settings,
+    state,
+    plutobar,
+    setup,
+    applyPlutobar,
+    setSearchFolders,
+    codeCandidates: setup.codeCandidates,
+    signIn: signInClaude,
+    saveApiKey,
+    refreshClaude,
+    downloadSpeech,
+    warmUp,
+    previewVoice,
+    // VoiceOS's own pages (Apps, Agent, Dictation, History) in the main window.
+    openPage: (page) => hooks.openMainWindow?.("voiceos:navigate", page),
+    openClassicSettings: () => hooks.openMainWindow?.("voiceos:open-settings", "general"),
+  });
+  fileSearch.onChange(() => updateTray());
   electron.app.on("will-quit", () => plutobar.quit());
   require("./assistant/musicApp").setHooks({ pauseVoiceOSPlayer: hooks.pauseInternalMusic });
   log.info("[VoiceOS] local runtime ready — speech on-device, assistant: Claude");
@@ -255,6 +278,53 @@ async function downloadVoice() {
     throw err;
   } finally {
     pushState();
+  }
+}
+
+// A sample of the chosen voice, played on this Mac.
+async function previewVoice() {
+  await tts.ensureReady();
+  const v = settings.voice();
+  const chunks = [];
+  let rate = 24000;
+  const job = tts.synthesize("Hi, I'm Pluto. Ask me anything.", {
+    voice: v.kokoroVoice,
+    speed: v.speed,
+    onChunk: (pcm, sampleRate) => (chunks.push(Buffer.from(pcm)), sampleRate && (rate = sampleRate)),
+  });
+  await job.promise;
+  const file = path.join(require("node:os").tmpdir(), "plutobar-voice-sample.wav");
+  fs.writeFileSync(file, pcm16ToWav(Buffer.concat(chunks), rate));
+  require("node:child_process").execFile("/usr/bin/afplay", [file], () => fs.rmSync(file, { force: true }));
+}
+
+// ------------------------------------------------------------ menu bar
+
+let tray = null;
+let trayRebuildAt = 0;
+
+// "Indexing · 42%" while there's a first pass going, as the menu bar icon's
+// title (when that's on) and as the menu's first line.
+function indexingLine() {
+  const st = fileSearch.status;
+  if (st.model.phase === "downloading") return "Getting the search model · " + Math.floor(st.model.fraction * 100) + "%";
+  const total = st.searchable + st.pending;
+  if (fileSearch.isPaused()) return total ? "Indexing paused · " + Math.floor((100 * st.searchable) / total) + "%" : null;
+  if (st.pending > 0 && total) return "Indexing · " + Math.floor((100 * st.searchable) / total) + "%  (" + st.searchable.toLocaleString() + " of " + total.toLocaleString() + " files)";
+  return null;
+}
+
+function updateTray() {
+  if (!tray || tray.isDestroyed?.()) return;
+  const st = fileSearch.status;
+  const total = st.searchable + st.pending;
+  const busy = st.model.phase === "downloading" || (st.pending > 0 && total && !fileSearch.isPaused());
+  const pct = st.model.phase === "downloading" ? st.model.fraction : total ? st.searchable / total : 1;
+  tray.setTitle(settings.plutobar().menuBarProgress && busy ? " " + Math.floor(pct * 100) + "%" : "", { fontType: "monospacedDigit" });
+  // The menu's line follows, at most every few seconds.
+  if (Date.now() - trayRebuildAt > 4000) {
+    trayRebuildAt = Date.now();
+    hooks.onStateChanged?.();
   }
 }
 
@@ -432,7 +502,8 @@ function registerIpc() {
     applyPlutobar();
   });
   handle("voiceos:plutobar-setup", async () => setup.show());
-  handle("voiceos:choose-folders", async () => setup.show({ step: 3 }));
+  handle("voiceos:choose-folders", async () => settingsWindow.show("search"));
+  handle("voiceos:open-pluto-settings", async ({ pane } = {}) => settingsWindow.show(pane));
 
   handle("voiceos:open-external", async ({ url }) => {
     if (/^https:\/\/(code\.claude\.com|claude\.com|claude\.ai|console\.anthropic\.com|platform\.claude\.com)\//.test(url || "")) await electron.shell.openExternal(url);
@@ -442,26 +513,27 @@ function registerIpc() {
 // ---------------------------------------------------------------- window
 
 // Opens the main window on a Settings tab ("claude" | "speech" | "general").
+// Claude, Speech and PlutoBar settings live in PlutoBar Settings now.
 function openSettings(tab = "claude") {
+  const pane = { claude: "pluto", speech: "dictation", plutobar: "general", notch: "general" }[tab];
+  if (pane && settingsWindow.show(pane)) return;
   hooks.openMainWindow?.("voiceos:open-settings", tab);
 }
 
 function trayMenuItems() {
   const s = state();
-  const needsSetup = Object.values(s.setup).some((ok) => !ok);
+  const keys = (accel) => accel.replace("Command", "⌘").replace("Shift", "⇧").replace("Control", "⌃").replace("Alt", "⌥").replace(/\+/g, "");
   const claude = s.assistant.active
     ? "Claude: " + (s.assistant.active.engine === "subscription" ? s.claude.email || "your account" : "API key") + " · " + s.assistant.active.model
     : "Claude: not connected";
-  const speech = s.engines.whisper.ready ? "Speech: on-device" : "Speech: model not downloaded";
-  const pluto = s.plutobar.active
-    ? [{ label: "Open PlutoBar" + (s.plutobar.shortcutOk ? "  (" + s.plutobar.shortcut.replace("Command", "⌘").replace("Shift", "⇧").replace("Control", "⌃").replace("Alt", "⌥").replace(/\+/g, "") + ")" : ""), click: () => plutobar.show() }, { label: "Set Up PlutoBar…", click: () => setup.show() }]
-    : [];
-  return [
-    ...pluto,
-    ...(needsSetup ? [{ label: "Finish setting up VoiceOS…", click: () => hooks.openMainWindow?.() }] : []),
-    { label: claude, click: () => openSettings("claude") },
-    { label: speech, click: () => openSettings("speech") },
-  ];
+  const indexing = indexingLine();
+  const items = [];
+  if (s.plutobar.active) items.push({ label: "Open PlutoBar" + (s.plutobar.shortcutOk ? "  (" + keys(s.plutobar.shortcut) + ")" : ""), click: () => plutobar.show() });
+  // Setup only until it's done; after that it's in Settings → General.
+  if (s.plutobar.active && !settings.plutobar().setupDone) items.push({ label: "Finish Setting Up PlutoBar…", click: () => setup.show() });
+  if (indexing) items.push({ label: indexing, click: () => settingsWindow.show("search") });
+  items.push({ label: claude, click: () => settingsWindow.show("pluto") });
+  return items;
 }
 
 // ------------------------------------------------------ local REST routes
@@ -537,6 +609,13 @@ module.exports = {
     plutobar.isEnabled() && agentEvents.translate(channel, data, ctx, plutobar.agentEvent),
   // PlutoBar owns the assistant, so the original notch draws nothing at the top.
   nativeNotchOwnsTop: () => plutobar.isEnabled(),
+  // PlutoBar's own Settings window (the tray's Settings).
+  openPlutoSettings: (pane) => settingsWindow.show(pane),
+  // The menu bar icon: indexing progress next to it.
+  adoptTray: (t) => {
+    tray = t;
+    updateTray();
+  },
   // The original Electron agent notch becomes an invisible engine.
   adoptAgentNotchWindow: (win) => agentEvents.adoptAgentNotchWindow(win),
 };

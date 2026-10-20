@@ -125176,7 +125176,7 @@ async function rebuildTrayMenu() {
       { type: "separator" },
       {
         label: _0x2507f2.settings,
-        click: () => showMainWindowAndNavigate("navigate-to-settings"),
+        click: () => localRuntime.openPlutoSettings(), // [local-runtime] PlutoBar's own Settings
       },
       {
         label: _0x2507f2.showHistory,
@@ -125221,7 +125221,8 @@ async function createAppTray() {
     tray = electron.app.isPackaged
       ? new electron.Tray(_0x55d324, TRAY_GUID)
       : new electron.Tray(_0x55d324);
-  (tray.setToolTip("VoiceOS"),
+  (tray.setToolTip("PlutoBar"),
+    localRuntime.adoptTray(tray), // [local-runtime] indexing progress in the menu bar
     await rebuildTrayMenu(),
     process.platform !== "darwin" &&
       (tray.on("click", () => {

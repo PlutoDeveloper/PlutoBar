@@ -234,6 +234,8 @@ function onAction(a) {
       return clipboard.onChange(a);
     case "setup":
       return hooks.setup?.(a);
+    case "settings":
+      return hooks.settings?.(a);
   }
 }
 
@@ -412,9 +414,12 @@ function render(keepSelection = false) {
         add("ask", "Pluto", [askRow]);
         break;
       }
-      const calc = actions.calculate(query);
-      const url = actions.urlFor(query);
-      const askiness = actions.askiness(query);
+      const prefs = hooks.prefs?.() || {};
+      const quick = prefs.quickAnswers !== false;
+      const calc = quick && actions.calculate(query);
+      const url = quick && actions.urlFor(query);
+      // "Ask Pluto first" off: Pluto is offered, but never the top hit.
+      const askiness = prefs.askFirst === false ? 0 : actions.askiness(query);
       const appHits = apps.match(query, launches, 5);
       const best = appHits[0];
       let top = null;

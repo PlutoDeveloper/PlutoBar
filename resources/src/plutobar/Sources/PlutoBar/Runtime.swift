@@ -7,6 +7,7 @@ final class PlutoRuntime {
   static let shared = PlutoRuntime()
   let controller = PlutoController()
   let setup = SetupController()
+  let settings = SettingsController()
   private var pasteboardCount = NSPasteboard.general.changeCount
   private var pasteboardTimer: Timer?
 
@@ -23,6 +24,7 @@ final class PlutoRuntime {
       if parts.first == "key", parts.count > 1 { self?.controller.debugKey(parts[1]) }
       if parts.first == "agent", parts.count > 1 { self?.agentEvent(parts[1]) }
       if parts.first == "setup" { self?.setup.show() }
+      if parts.first == "settings" { self?.settings.show(pane: parts.count > 1 ? parts[1] : nil) }
       if parts.first == "setupStep", parts.count > 1, let n = Int(parts[1]), let s = SetupModel.Step(rawValue: n) { self?.setup.model.go(to: s) }
     }
   }
@@ -119,3 +121,20 @@ public func plutobarSetupState(_ json: UnsafePointer<CChar>) {
   guard let data = String(cString: json).data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
   PlutoRuntime.shared.setup.model.update(o)
 }
+
+// {"pane": "general|search|pluto|apps|dictation|permissions|about"}
+@_cdecl("plutobar_settings_show")
+public func plutobarSettingsShow(_ json: UnsafePointer<CChar>) {
+  let data = String(cString: json).data(using: .utf8) ?? Data()
+  let o = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+  PlutoRuntime.shared.settings.show(pane: o["pane"] as? String)
+}
+
+@_cdecl("plutobar_settings_state")
+public func plutobarSettingsState(_ json: UnsafePointer<CChar>) {
+  guard let data = String(cString: json).data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+  PlutoRuntime.shared.settings.model.update(o)
+}
+
+@_cdecl("plutobar_settings_visible")
+public func plutobarSettingsVisible() -> Bool { PlutoRuntime.shared.settings.isVisible }
