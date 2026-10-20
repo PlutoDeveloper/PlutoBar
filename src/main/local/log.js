@@ -1,5 +1,5 @@
 "use strict";
-// Logs to the app's electron-log file (~/Library/Logs/VoiceOS opensourced/).
+// Logs to the app's electron-log file (~/Library/Logs/PlutoBar/).
 // main.js silences console.log/info, so the local runtime logs through here.
 const log = require("electron-log");
 

@@ -155,15 +155,34 @@ class Settings {
 
   plutobar() {
     const p = (this.store.get(STORE_KEY) || {}).plutobar || {};
-    return { enabled: p.enabled !== false, shortcut: p.shortcut || "Alt+Space", clipboard: p.clipboard !== false };
+    return { enabled: p.enabled !== false, shortcut: p.shortcut || null, clipboard: p.clipboard !== false, setupDone: p.setupDone === true };
   }
 
   setPlutobar(patch) {
     const raw = this.store.get(STORE_KEY) || {};
     const next = { ...this.plutobar(), ...patch };
-    this.store.set(STORE_KEY, { ...raw, plutobar: { enabled: !!next.enabled, shortcut: String(next.shortcut || "Alt+Space"), clipboard: !!next.clipboard } });
+    this.store.set(STORE_KEY, {
+      ...raw,
+      plutobar: { enabled: !!next.enabled, shortcut: next.shortcut ? String(next.shortcut) : null, clipboard: !!next.clipboard, setupDone: !!next.setupDone },
+    });
     this.emit();
     return this.plutobar();
+  }
+
+  // What file search covers (local/plutobar/digup.js): the folders, folders
+  // and file types skipped inside them, and the code folders (empty: off).
+  // `chosen` turns true once you've picked them (setup, or Settings).
+  files() {
+    const f = (this.store.get(STORE_KEY) || {}).files || {};
+    const list = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
+    return { roots: list(f.roots), skipped: list(f.skipped), types: list(f.types), codeRoots: list(f.codeRoots), codeSkipped: list(f.codeSkipped), chosen: f.chosen === true };
+  }
+
+  setFiles(patch) {
+    const raw = this.store.get(STORE_KEY) || {};
+    this.store.set(STORE_KEY, { ...raw, files: { ...this.files(), ...patch } });
+    this.emit();
+    return this.files();
   }
 
   clearApiKey() {

@@ -19,6 +19,7 @@ final class PlutoController: NSObject, NSWindowDelegate {
   private var panel: PlutoPanel?
   private var hosting: NSHostingView<PlutoRoot>?
   private var keyMonitor: Any?
+  private var clickMonitors: [Any] = []
   private var contentHeight: CGFloat = PlutoMetrics.barHeight
   private var shrinkWork: DispatchWorkItem?
   private var topY: CGFloat = 0
@@ -98,9 +99,41 @@ final class PlutoController: NSObject, NSWindowDelegate {
 
   // Clicking anywhere else closes the bar, unless the assistant still needs it
   // (listening, working, waiting for your approval).
+  // Switching apps from the keyboard (⌘Tab) closes an idle search. A
+  // conversation stays: other windows take focus for all sorts of reasons
+  // while Pluto works, and only a click elsewhere should close it.
   func windowDidResignKey(_ notification: Notification) {
-    guard visible, !model.holdsOpen else { return }
+    guard visible, model.mode == .search, !model.holdsOpen else { return }
     hide()
+  }
+
+  // Like Spotlight: a click anywhere outside the bar closes it, whatever Pluto
+  // is doing (it carries on, and the shortcut brings it back). Not while it's
+  // listening or waiting for your approval.
+  private func clickedOutside() {
+    guard visible, model.phase != .listening, model.confirmation == nil else { return }
+    hide()
+  }
+
+  private func installClickWatch() {
+    guard clickMonitors.isEmpty else { return }
+    let kinds: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+    // Clicks in other apps (and the desktop).
+    if let m = NSEvent.addGlobalMonitorForEvents(matching: kinds, handler: { [weak self] _ in self?.clickedOutside() }) {
+      clickMonitors.append(m)
+    }
+    // Clicks in PlutoBar's own other windows.
+    if let m = NSEvent.addLocalMonitorForEvents(matching: kinds, handler: { [weak self] event in
+      if let self, let panel = self.panel, event.window !== panel { self.clickedOutside() }
+      return event
+    }) {
+      clickMonitors.append(m)
+    }
+  }
+
+  private func removeClickWatch() {
+    for m in clickMonitors { NSEvent.removeMonitor(m) }
+    clickMonitors = []
   }
 
   // The screen with the pointer: a quarter of the way down, centered.
@@ -157,6 +190,7 @@ final class PlutoController: NSObject, NSWindowDelegate {
 
   // Arrows, Return, Escape and ⌘1…⌘4 go to the bar before the text field sees them.
   private func installKeys() {
+    installClickWatch()
     guard keyMonitor == nil else { return }
     keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
       guard let self, let panel = self.panel, event.window === panel else { return event }
@@ -167,6 +201,7 @@ final class PlutoController: NSObject, NSWindowDelegate {
   private func removeKeys() {
     if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
     keyMonitor = nil
+    removeClickWatch()
   }
 
   private func key(_ event: NSEvent) -> Bool {

@@ -1,6 +1,6 @@
 "use strict";
-// search_files: the user's own files, found by what's in them, through DigUp's
-// on-device index (see ../plutobar/digup.js). Photos by what they show, PDFs at
+// search_files: the user's own files, found by what's in them, through the
+// built-in on-device index (DigUp's engine: see ../plutobar/digup.js). Photos by what they show, PDFs at
 // the page, documents at the passage, recordings and videos at the moment,
 // code ("code: …") at the function. Read-only: it never changes a file.
 
@@ -37,7 +37,7 @@ async function run(args = {}) {
   const query = String(args.query || "").trim();
   if (!query) throw new Error("Pass query: what to find.");
   if (!digup.available())
-    return { content: "DigUp isn't installed (or hasn't indexed anything), so files can't be searched by content. Tell the user they can install DigUp from Settings → PlutoBar; meanwhile use the finder_ actions in app_tool to look by name." };
+    return { content: "File search isn't set up yet (no folders indexed), so files can't be searched by content. Tell the user to choose folders in Settings → PlutoBar; meanwhile use the finder_ actions in app_tool to look by name." };
   const code = /^code:/i.test(query);
   const words = code ? query.replace(/^code:\s*/i, "") : query;
   const limit = Math.min(Math.max(Number(args.limit) || 6, 1), 20);
@@ -53,9 +53,9 @@ async function run(args = {}) {
   return {
     content: JSON.stringify({
       query,
-      searched: reply.meaning ? "meaning and exact words" : "exact words only (DigUp's model isn't ready)",
+      searched: reply.meaning ? "meaning and exact words" : "exact words only (the search model is still downloading)",
       results,
-      ...(results.length ? {} : { note: "Nothing in the folders DigUp indexes matched. The user chooses those folders in DigUp." }),
+      ...(results.length ? {} : { note: "Nothing in the searched folders matched. The user chooses those folders in Settings → PlutoBar." }),
     }),
   };
 }

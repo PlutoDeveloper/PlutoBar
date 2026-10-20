@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds "VoiceOS opensourced.app" into dist/ and signs it with a stable
+# Builds "PlutoBar.app" into dist/ and signs it with a stable
 # identity so macOS permissions (Microphone, Accessibility) stick to the app
 # across rebuilds. (`npm run dev` runs as the generic Electron binary, which
 # macOS can't grant reliably.)
@@ -13,7 +13,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-APP_NAME="VoiceOS opensourced"
+APP_NAME="PlutoBar"
+OLD_NAME="VoiceOS opensourced"   # its name before PlutoBar
 ENT="resources/build/entitlements.mac.plist"
 
 IDENTITY="${VOICEOS_SIGN_IDENTITY:-}"
@@ -26,13 +27,16 @@ if [[ -z "$IDENTITY" ]]; then
 fi
 
 # Quit a running copy so the bundle can be replaced (force after 5s).
-PATTERN="dist/mac.*/$APP_NAME.app/Contents/MacOS/"
+PATTERN="dist/mac.*/($APP_NAME|$OLD_NAME).app/Contents/MacOS/"
 if pgrep -f "$PATTERN" >/dev/null; then
   pkill -f "$PATTERN" || true
   for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "$PATTERN" >/dev/null || break; sleep 0.5; done
   pkill -9 -f "$PATTERN" 2>/dev/null || true
-  pkill -9 -f "$APP_NAME.app/Contents/Resources/binaries/" 2>/dev/null || true
+  pkill -9 -f "($APP_NAME|$OLD_NAME).app/Contents/Resources/binaries/" 2>/dev/null || true
 fi
+
+# The bundle from before the rename would be a second copy of the app.
+rm -rf dist/mac*/"$OLD_NAME.app"
 
 echo "→ Building app bundle"
 npx electron-builder --mac dir -c.mac.identity=null >/dev/null

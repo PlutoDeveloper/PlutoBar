@@ -23,6 +23,8 @@ const models = require("./speech/models");
 const { pcm16ToWav } = require("./speech/transcribe");
 const agentEvents = require("./agentEvents");
 const plutobar = require("./plutobar");
+const setup = require("./setup");
+const fileSearch = require("./plutobar/digup");
 
 const log = require("./log");
 const { claudeCode, claudeApi } = assistant;
@@ -37,7 +39,42 @@ const downloads = {};
 // --------------------------------------------------------------- startup
 
 function installEarly() {
+  moveDataFolder();
   installNetworkGuard({ electron, routes: localRoutes() });
+}
+
+// The app was "VoiceOS opensourced" before it was PlutoBar. Chromium makes
+// PlutoBar's folder before any of this runs, so the first time, what's yours
+// (speech models, history, settings, the windows' storage) moves into it,
+// replacing the empty copies just made, and the rest of the old folder (caches)
+// goes to the Trash. Runs before anything opens those files.
+const MOVED = ["models", "voiceos.db", "voiceos.db-wal", "voiceos.db-shm", "config.json", "plutobar.json", "agent-nudge.json",
+  "audio-backend.json", "audio-recordings", "claude-workspace", "managed-browsers", "ui-control-state.json", "Local Storage",
+  "Partitions", "IndexedDB"];
+
+function moveDataFolder() {
+  try {
+    const appData = electron.app.getPath("appData");
+    const now = electron.app.getPath("userData");
+    const before = path.join(appData, "VoiceOS opensourced");
+    const marker = path.join(now, ".moved-from-voiceos");
+    if (path.basename(now) !== "PlutoBar" || !fs.existsSync(before) || fs.existsSync(marker)) return;
+    fs.mkdirSync(now, { recursive: true });
+    const hasFiles = (dir) => fs.existsSync(dir) && fs.readdirSync(dir).some((f) => !f.startsWith("."));
+    for (const name of MOVED) {
+      const from = path.join(before, name);
+      if (!fs.existsSync(from)) continue;
+      // Models PlutoBar already downloaded stay (the old copies go with the folder).
+      if (name === "models" && hasFiles(path.join(now, "models"))) continue;
+      fs.rmSync(path.join(now, name), { recursive: true, force: true });
+      fs.renameSync(from, path.join(now, name));
+    }
+    fs.writeFileSync(marker, new Date().toISOString());
+    // What's left is caches: to the Trash (recoverable), once the app is up.
+    electron.app.whenReady().then(() => electron.shell.trashItem(before).catch(() => {}));
+  } catch (err) {
+    log.warn("[PlutoBar] couldn't move the old data folder: " + err.message);
+  }
 }
 
 function attachStore(store, STORE_KEYS) {
@@ -89,7 +126,29 @@ function onReady(readyHooks = {}) {
     ...hooks.notchActions,
     stopSpeaking: () => voiceClient?.stopSpeaking(),
     openSettings: () => openSettings("plutobar"),
+    setup: (a) => setup.handle(a),
+    chooseFolders: () => setup.show({ step: 3 }),
   });
+  setup.init({
+    addon: () => plutobar.addon(),
+    settings,
+    state,
+    downloadSpeech,
+    signIn: signInClaude,
+    saveApiKey,
+    setShortcut: (accel) => {
+      settings.setPlutobar({ shortcut: accel });
+      applyPlutobar();
+    },
+    shortcutStatus: () => plutobar.shortcutStatus(),
+    freeCommandSpace: () => {
+      plutobar.freeCommandSpace();
+      applyPlutobar();
+    },
+    setSearchFolders,
+    showBar: () => plutobar.show(),
+  });
+  plutobar.onShortcut(() => setup.shortcutPressed());
   electron.app.on("will-quit", () => plutobar.quit());
   require("./assistant/musicApp").setHooks({ pauseVoiceOSPlayer: hooks.pauseInternalMusic });
   log.info("[VoiceOS] local runtime ready — speech on-device, assistant: Claude");
@@ -101,6 +160,9 @@ function onReady(readyHooks = {}) {
   refreshClaude().finally(() => hooks.onStateChanged?.());
   setTimeout(warmUp, 2500);
   applyPlutobar();
+  startFileSearch().catch((err) => log.warn("[Search] " + err.message));
+  // First launch: the setup window (after the other windows have come up).
+  if (plutobar.isEnabled() && !settings.plutobar().setupDone) setTimeout(() => setup.show(), 1500);
 }
 
 // PlutoBar on: the assistant lives in the bar. Off: back in VoiceOS's
@@ -111,6 +173,24 @@ function applyPlutobar() {
   plutobarStatus = plutobar.setEnabled(p.enabled, p);
   agentEvents.setLegacyHidden(plutobar.isEnabled());
   pushState();
+}
+
+// File search (DigUp's engine, built in): the folders come from settings. The
+// first time, a DigUp already set up on this Mac hands over its model, index
+// and folders; then indexing starts for whatever folders are chosen.
+async function startFileSearch() {
+  fileSearch.setFolderSource(() => settings.files());
+  fileSearch.onChange(() => pushState());
+  if (!settings.files().chosen) {
+    const theirs = await fileSearch.importDigUp();
+    if (theirs?.roots?.length) settings.setFiles({ ...theirs, chosen: true });
+  }
+  fileSearch.start();
+}
+
+function setSearchFolders(patch) {
+  settings.setFiles({ ...patch, chosen: true });
+  fileSearch.foldersChanged();
 }
 
 async function refreshClaude() {
@@ -178,6 +258,25 @@ async function downloadVoice() {
   }
 }
 
+async function downloadSpeech() {
+  await Promise.all([downloadWhisper(settings.read().speech.whisperModel), settings.voice().enabled ? downloadVoice() : null]);
+}
+
+// ---------------------------------------------------------------- Claude
+
+async function signInClaude() {
+  settings.setClaudeStatus(await claudeCode.signIn());
+  settings.set("assistant.engine", "subscription");
+}
+
+async function saveApiKey(key) {
+  await claudeApi.verifyKey(String(key || "").trim()).catch((err) => {
+    throw new Error(claudeApi.friendlyError(err));
+  });
+  settings.setApiKey(key);
+  settings.set("assistant.engine", "apikey");
+}
+
 // ---------------------------------------------------------- permissions
 
 function permissions() {
@@ -213,8 +312,11 @@ function state() {
       available: plutobar.isAvailable(),
       ...settings.plutobar(),
       active: plutobarStatus.active,
+      // The shortcut in use (the setting, or the default when there's none).
+      shortcut: plutobar.shortcutStatus().shortcut || settings.plutobar().shortcut || "Alt+Space",
       shortcutOk: plutobarStatus.shortcutOk,
-      digup: require("./plutobar/digup").available(),
+      spotlightConflict: plutobar.shortcutStatus().spotlightConflict,
+      files: { ...settings.files(), searchable: fileSearch.status.searchable, pending: fileSearch.status.pending, model: fileSearch.status.model.phase },
     },
     // What the Dashboard's setup card still needs.
     setup: {
@@ -270,10 +372,7 @@ function registerIpc() {
 
   // Claude
   handle("voiceos:claude-refresh", refreshClaude);
-  handle("voiceos:claude-sign-in", async () => {
-    settings.setClaudeStatus(await claudeCode.signIn());
-    settings.set("assistant.engine", "subscription");
-  });
+  handle("voiceos:claude-sign-in", signInClaude);
   handle("voiceos:claude-test", async () => {
     const target = settings.resolveAssistant("agent");
     if (!target) throw new Error("Claude isn't connected yet.");
@@ -281,19 +380,11 @@ function registerIpc() {
     const reply = await assistant.complete(target, { prompt: "Reply with exactly: VoiceOS is ready." });
     return { reply, latencyMs: Date.now() - started };
   });
-  handle("voiceos:save-api-key", async ({ key }) => {
-    await claudeApi.verifyKey(String(key || "").trim()).catch((err) => {
-      throw new Error(claudeApi.friendlyError(err));
-    });
-    settings.setApiKey(key);
-    settings.set("assistant.engine", "apikey");
-  });
+  handle("voiceos:save-api-key", async ({ key }) => saveApiKey(key));
   handle("voiceos:clear-api-key", async () => settings.clearApiKey());
 
   // Speech
-  handle("voiceos:download-speech", async () => {
-    await Promise.all([downloadWhisper(settings.read().speech.whisperModel), settings.voice().enabled ? downloadVoice() : null]);
-  });
+  handle("voiceos:download-speech", downloadSpeech);
   handle("voiceos:download-whisper", async ({ id }) => downloadWhisper(id));
   handle("voiceos:download-voice", downloadVoice);
   handle("voiceos:cancel-download", async ({ key }) => models.cancelDownload(key));
@@ -336,11 +427,12 @@ function registerIpc() {
     if (allowed.shortcut && !plutobarStatus.shortcutOk) throw new Error(allowed.shortcut + " is already used by another app. Pick another shortcut.");
   });
   handle("voiceos:plutobar-show", async () => plutobar.show());
-  handle("voiceos:open-digup", async () => {
-    const app = require("./plutobar/digup").appPath();
-    if (app) await electron.shell.openPath(app);
-    else await electron.shell.openExternal("https://github.com/ARahim3/DigUp/releases/latest");
+  handle("voiceos:free-command-space", async () => {
+    plutobar.freeCommandSpace();
+    applyPlutobar();
   });
+  handle("voiceos:plutobar-setup", async () => setup.show());
+  handle("voiceos:choose-folders", async () => setup.show({ step: 3 }));
 
   handle("voiceos:open-external", async ({ url }) => {
     if (/^https:\/\/(code\.claude\.com|claude\.com|claude\.ai|console\.anthropic\.com|platform\.claude\.com)\//.test(url || "")) await electron.shell.openExternal(url);
@@ -362,7 +454,7 @@ function trayMenuItems() {
     : "Claude: not connected";
   const speech = s.engines.whisper.ready ? "Speech: on-device" : "Speech: model not downloaded";
   const pluto = s.plutobar.active
-    ? [{ label: "Open PlutoBar" + (s.plutobar.shortcutOk ? "  (" + s.plutobar.shortcut.replace("Command", "⌘").replace("Shift", "⇧").replace("Control", "⌃").replace("Alt", "⌥").replace(/\+/g, "") + ")" : ""), click: () => plutobar.show() }]
+    ? [{ label: "Open PlutoBar" + (s.plutobar.shortcutOk ? "  (" + s.plutobar.shortcut.replace("Command", "⌘").replace("Shift", "⇧").replace("Control", "⌃").replace("Alt", "⌥").replace(/\+/g, "") + ")" : ""), click: () => plutobar.show() }, { label: "Set Up PlutoBar…", click: () => setup.show() }]
     : [];
   return [
     ...pluto,

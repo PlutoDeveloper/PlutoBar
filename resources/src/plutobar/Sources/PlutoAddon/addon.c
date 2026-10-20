@@ -14,6 +14,10 @@ extern bool plutobar_is_visible(void);
 extern void plutobar_results(const char *json);
 extern void plutobar_agent_event(const char *json);
 extern void plutobar_state(const char *json);
+extern void plutobar_setup_show(void);
+extern void plutobar_setup_close(void);
+extern bool plutobar_setup_visible(void);
+extern void plutobar_setup_state(const char *json);
 
 static napi_threadsafe_function action_fn = NULL;
 
@@ -52,6 +56,8 @@ static char *string_arg(napi_env env, napi_callback_info info) {
   }
 VOID_FN(Start, plutobar_start)
 VOID_FN(Hide, plutobar_hide)
+VOID_FN(SetupShow, plutobar_setup_show)
+VOID_FN(SetupClose, plutobar_setup_close)
 
 #define JSON_FN(name, fn)                                         \
   static napi_value name(napi_env env, napi_callback_info info) { \
@@ -64,10 +70,17 @@ JSON_FN(Show, plutobar_show)
 JSON_FN(Results, plutobar_results)
 JSON_FN(AgentEvent, plutobar_agent_event)
 JSON_FN(State, plutobar_state)
+JSON_FN(SetupState, plutobar_setup_state)
 
 static napi_value IsVisible(napi_env env, napi_callback_info info) {
   napi_value result;
   napi_get_boolean(env, plutobar_is_visible(), &result);
+  return result;
+}
+
+static napi_value SetupVisible(napi_env env, napi_callback_info info) {
+  napi_value result;
+  napi_get_boolean(env, plutobar_setup_visible(), &result);
   return result;
 }
 
@@ -97,6 +110,10 @@ NAPI_MODULE_INIT() {
     {"agentEvent", NULL, AgentEvent, NULL, NULL, NULL, napi_default, NULL},
     {"state", NULL, State, NULL, NULL, NULL, napi_default, NULL},
     {"onAction", NULL, OnAction, NULL, NULL, NULL, napi_default, NULL},
+    {"setupShow", NULL, SetupShow, NULL, NULL, NULL, napi_default, NULL},
+    {"setupClose", NULL, SetupClose, NULL, NULL, NULL, napi_default, NULL},
+    {"setupVisible", NULL, SetupVisible, NULL, NULL, NULL, napi_default, NULL},
+    {"setupState", NULL, SetupState, NULL, NULL, NULL, napi_default, NULL},
   };
   napi_define_properties(env, exports, sizeof(props) / sizeof(props[0]), props);
   return exports;

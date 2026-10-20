@@ -19,7 +19,7 @@ const BUILT_IN = [
   { id: "screenshot", title: "Take Screenshot", symbol: "camera.viewfinder", words: "screenshot capture screen grab", run: (c) => c.shell.openPath("/System/Applications/Utilities/Screenshot.app") },
   { id: "history", title: "Pluto History", symbol: "clock.arrow.circlepath", words: "history conversations past chats", run: (c) => c.openHistory() },
   { id: "settings", title: "PlutoBar Settings", symbol: "gearshape", words: "settings preferences plutobar voiceos shortcut", run: (c) => c.openSettings() },
-  { id: "digup", title: "Choose Folders to Search (DigUp)", symbol: "magnifyingglass", words: "digup index folders files search", run: (c) => c.openDigUp() },
+  { id: "folders", title: "Choose Folders to Search", symbol: "folder.badge.gearshape", words: "folders files search index digup", run: (c) => c.chooseFolders() },
 ];
 
 function system(args) {

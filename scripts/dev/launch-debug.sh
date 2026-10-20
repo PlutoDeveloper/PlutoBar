@@ -4,12 +4,12 @@
 #   scripts/dev/launch-debug.sh          (uses dist/mac-arm64, run `npm run app` first)
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-APP="$ROOT/dist/mac-arm64/VoiceOS opensourced.app"
+APP="$ROOT/dist/mac-arm64/PlutoBar.app"
 PORT="${CDP_PORT:-9333}"
 LOG="${VOICEOS_DEBUG_CLAUDE:-$ROOT/scripts/dev/.claude-stream.jsonl}"
 # The port sometimes isn't opened on the first launch after a rebuild; retry.
 for attempt in 1 2 3; do
-  pkill -f "VoiceOS opensourced.app/Contents/MacOS" 2>/dev/null
+  pkill -f "PlutoBar.app/Contents/MacOS" 2>/dev/null
   sleep 4
   : > "$LOG"
   open -n -a "$APP" --env "VOICEOS_DEBUG_CLAUDE=$LOG" --args "--remote-debugging-port=$PORT"

@@ -4,3 +4,5 @@ dist/
 *.log
 scripts/dev/.claude-stream.jsonl
 resources/src/plutobar/.build/
+resources/src/digup/.build/
+resources/src/digup/Vendor/

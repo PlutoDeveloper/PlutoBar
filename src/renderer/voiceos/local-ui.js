@@ -3,7 +3,7 @@
 //   SetupCard   Dashboard checklist until speech, Claude and permissions are ready
 //   ClaudeTab   Settings → Claude: account, models, optional API key
 //   SpeechTab   Settings → Speech: Whisper models, reply voice, permissions
-//   PlutoBarTab Settings → PlutoBar: the Spotlight-style bar, its shortcut, DigUp
+//   PlutoBarTab Settings → PlutoBar: the Spotlight-style bar, its shortcut, folders to search
 // State and actions come from src/main/local/index.js over "voiceos:*" IPC.
 (() => {
   "use strict";
@@ -202,14 +202,14 @@
     if (!claude.installed)
       account = h(
         Row,
-        { dark, icon: Terminal, title: "Install Claude Code", desc: "VoiceOS uses your Claude plan through Claude Code, Anthropic's official app. Install it, then come back here." },
+        { dark, icon: Terminal, title: "Install Claude Code", desc: "PlutoBar uses your Claude plan through Claude Code, Anthropic's official app. Install it, then come back here." },
         h(Btn, { dark, variant: "ghost", onClick: () => run("refresh", "voiceos:claude-refresh"), busy: busy === "refresh" }, "Check again"),
         h(Btn, { dark, variant: "primary", onClick: () => openExternal("https://code.claude.com/docs/en/setup") }, "Install"),
       );
     else if (!claude.signedIn)
       account = h(
         Row,
-        { dark, icon: LogIn, title: "Sign in to Claude", desc: "Opens Anthropic's sign-in page in your browser. Works with Pro and Max plans. VoiceOS never sees your password or tokens." },
+        { dark, icon: LogIn, title: "Sign in to Claude", desc: "Opens Anthropic's sign-in page in your browser. Works with Pro and Max plans. PlutoBar never sees your password or tokens." },
         h(Btn, { dark, variant: "primary", onClick: () => run("signin", "voiceos:claude-sign-in"), busy: busy === "signin" }, busy === "signin" ? "Waiting…" : "Sign in"),
       );
     else {
@@ -317,7 +317,7 @@
             claude.signedIn &&
             h(
               Row,
-              { dark, icon: RefreshCw, title: "Use for requests", desc: "Choose which one VoiceOS uses. The other stays as a fallback." },
+              { dark, icon: RefreshCw, title: "Use for requests", desc: "Choose which one PlutoBar uses. The other stays as a fallback." },
               h(Segmented, {
                 dark,
                 value: usingApi ? "apikey" : "subscription",
@@ -427,7 +427,7 @@
           h(
             "p",
             { className: "text-xs mt-3", style: { color: WARN } },
-            "This is the development build (“Electron”), which macOS doesn't grant reliably. Run npm run app for the signed VoiceOS app.",
+            "This is the development build (“Electron”), which macOS doesn't grant reliably. Run npm run app for the signed PlutoBar app.",
           ),
       ),
     );
@@ -436,10 +436,10 @@
   // -------------------------------------------------------- PlutoBar tab
 
   const SHORTCUTS = [
+    ["Command+Space", "⌘ Space (like Spotlight)"],
     ["Alt+Space", "⌥ Space"],
     ["Control+Alt+Space", "⌃⌥ Space"],
-    ["Command+Shift+Space", "⇧⌘ Space (DigUp's)"],
-    ["Command+Space", "⌘ Space (instead of Spotlight)"],
+    ["Command+Shift+Space", "⇧⌘ Space"],
   ];
 
   function PlutoBarTab({ isDarkMode: dark }) {
@@ -471,9 +471,10 @@
               key: "on",
               icon: Sparkles,
               title: "PlutoBar",
-              desc: !p.available ? "Not built. Run npm run build:plutobar." : p.active ? "On: Pluto listens, works and answers in the bar." : "Off: Pluto answers in VoiceOS's classic overlay.",
+              desc: !p.available ? "Not built. Run npm run build:plutobar." : p.active ? "On: Pluto listens, works and answers in the bar." : "Off: Pluto answers in PlutoBar's classic overlay.",
             },
             p.available && p.active && h(Btn, { dark, variant: "ghost", busy: busy === "show", onClick: () => run("show", "voiceos:plutobar-show") }, "Open"),
+            p.available && p.active && h(Btn, { dark, variant: "ghost", busy: busy === "setup", onClick: () => run("setup", "voiceos:plutobar-setup") }, "Run Setup"),
             p.available && h(Btn, { dark, variant: p.enabled ? "secondary" : "primary", busy: busy === "toggle", onClick: () => set("toggle", { enabled: !p.enabled }) }, p.enabled ? "Turn Off" : "Turn On"),
           ),
           h(
@@ -483,8 +484,9 @@
               key: "shortcut",
               icon: Zap,
               title: "Shortcut",
-              desc: p.active && !p.shortcutOk ? label + " is taken by another app: pick another." : p.shortcut === "Command+Space" ? "Turn off Spotlight's own ⌘ Space first: System Settings → Keyboard → Keyboard Shortcuts → Spotlight." : "Opens and closes PlutoBar from any app. Holding your voice shortcut still talks to Pluto.",
+              desc: p.active && !p.shortcutOk ? label + " is taken by another app: pick another." : p.spotlightConflict ? "Spotlight still answers ⌘ Space. Turn its shortcut off so PlutoBar gets it." : "Opens and closes PlutoBar from any app. Holding your voice shortcut still talks to Pluto.",
             },
+            p.spotlightConflict && h(Btn, { dark, variant: "primary", busy: busy === "spotlight", onClick: () => run("spotlight", "voiceos:free-command-space") }, "Turn Off Spotlight's ⌘ Space"),
             h(
               "select",
               {
@@ -500,14 +502,16 @@
             Row,
             {
               dark,
-              key: "digup",
+              key: "files",
               icon: ExternalLink,
-              title: "Search inside files (DigUp)",
-              desc: p.digup
-                ? "On: DigUp's on-device index finds photos by what they show, PDFs at the page, recordings and videos at the moment. Start with code: to search your code. Choose the folders in DigUp."
-                : "Install DigUp (free, open source, on-device) to find files by what's in them. Until then PlutoBar matches file names.",
+              title: "Folders to search",
+              desc: !p.files.roots.length
+                ? "None yet. PlutoBar finds photos by what they show, PDFs at the page, recordings and videos at the moment, all on this Mac."
+                : p.files.roots.length + (p.files.roots.length === 1 ? " folder" : " folders") +
+                  (p.files.codeRoots.length ? " + " + p.files.codeRoots.length + " for code" : "") + " · " +
+                  (p.files.model === "downloading" ? "getting the search model…" : p.files.pending ? p.files.searchable.toLocaleString() + " files searchable, " + p.files.pending.toLocaleString() + " still being read" : p.files.searchable.toLocaleString() + " files searchable"),
             },
-            h(Btn, { dark, busy: busy === "digup", onClick: () => run("digup", "voiceos:open-digup") }, p.digup ? "Choose Folders" : "Get DigUp"),
+            h(Btn, { dark, busy: busy === "folders", onClick: () => run("folders", "voiceos:choose-folders") }, "Choose Folders"),
           ),
           h(
             Row,
@@ -575,7 +579,7 @@
             done: false,
             icon: Terminal,
             title: "Connect Claude",
-            desc: "Install Claude Code, Anthropic's app. VoiceOS uses your Claude plan through it.",
+            desc: "Install Claude Code, Anthropic's app. PlutoBar uses your Claude plan through it.",
             action: h(
               "div",
               { className: "flex gap-2" },
@@ -594,14 +598,14 @@
         done: setup.microphone,
         icon: Mic,
         title: "Microphone",
-        desc: "Lets VoiceOS hear you while you hold a shortcut.",
+        desc: "Lets PlutoBar hear you while you hold a shortcut.",
         action: h(Btn, { dark, variant: "ghost", onClick: () => run("mic", "voiceos:request-microphone"), busy: busy === "mic" }, "Allow"),
       },
       {
         done: setup.accessibility,
         icon: Shield,
         title: "Accessibility",
-        desc: "Lets VoiceOS type into apps and hear your shortcuts. Switch on “" + (state.permissions.packaged ? "VoiceOS opensourced" : "Electron") + "”.",
+        desc: "Lets PlutoBar type into apps and hear your shortcuts. Switch on “" + (state.permissions.packaged ? "PlutoBar" : "Electron") + "”.",
         action: h(Btn, { dark, variant: "ghost", onClick: () => run("ax", "voiceos:request-accessibility") }, "Open Settings"),
       },
     ].filter(Boolean);

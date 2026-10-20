@@ -125,6 +125,21 @@ final class PlutoModel: ObservableObject {
 
   var onHide: (() -> Void)?
 
+  // A turn that goes quiet (Claude Code hung, a lost event) must not leave the
+  // bar thinking forever: after 90 s with no word from the assistant, say so.
+  private var lastHeard = Date()
+  private lazy var watchdog = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.checkStalled() }
+
+  private func checkStalled() {
+    guard isBusy, Date().timeIntervalSince(lastHeard) > 90 else { return }
+    if turns.isEmpty { turns.append(Turn(question: "")) }
+    var last = turns[turns.count - 1]
+    last.error = "Pluto didn't answer. Check Settings → Claude, then ask again."
+    turns[turns.count - 1] = last
+    withAnimation(PlutoMotion.morph) { phase = .error }
+    act(["a": "dismiss"])
+  }
+
   private var querySeq = 0
   private var shownSeq = 0
 
@@ -223,6 +238,8 @@ final class PlutoModel: ObservableObject {
       phase = .thinking
       query = ""
     }
+    lastHeard = Date()
+    _ = watchdog
     act(["a": "ask", "text": t])
   }
 
@@ -384,6 +401,8 @@ final class PlutoModel: ObservableObject {
   @discardableResult
   func handleAgent(_ e: [String: Any]) -> Bool {
     guard let type = e["t"] as? String else { return false }
+    if type != "level" { lastHeard = Date() }
+    _ = watchdog
     switch type {
     case "listen":
       if e["on"] as? Bool == true {

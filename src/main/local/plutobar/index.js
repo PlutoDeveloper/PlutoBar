@@ -5,7 +5,7 @@
 // Spotlight with Siri in macOS 27, takes whatever you type or say and decides
 // what it is:
 //   - a name to find: apps, actions and your Shortcuts, clipboard history, and
-//     your files by what's in them (DigUp's on-device index, see digup.js)
+//     your files by what's in them (DigUp's engine, built in: see digup.js)
 //   - a sum or a website: answered or opened right there
 //   - something to ask or do: "Ask Pluto" (the VoiceOS assistant: Claude with
 //     its Mac tools), offered on every query and the top hit when the query
@@ -22,6 +22,31 @@ const actions = require("./actions");
 const clipboard = require("./clipboard");
 const digup = require("./digup");
 
+// ⌘Space when Spotlight isn't using it, else ⌥Space.
+const SPOTLIGHT_KEY = "64"; // com.apple.symbolichotkeys: "Show Spotlight search"
+
+// Whether macOS Spotlight still answers ⌘Space (an entry missing means on).
+function spotlightOwnsCommandSpace() {
+  try {
+    const out = require("node:child_process").execFileSync("/usr/bin/defaults", ["export", "com.apple.symbolichotkeys", "-"], { timeout: 3000 });
+    const m = new RegExp("<key>" + SPOTLIGHT_KEY + "</key>\\s*<dict>\\s*<key>enabled</key>\\s*<(true|false)/>").exec(String(out));
+    return !m || m[1] === "true";
+  } catch {
+    return true;
+  }
+}
+
+// Turns off Spotlight's ⌘Space (what System Settings → Keyboard → Keyboard
+// Shortcuts → Spotlight does), only when you press the button that asks for it.
+function freeCommandSpace() {
+  const { execFileSync } = require("node:child_process");
+  execFileSync("/usr/bin/defaults", ["write", "com.apple.symbolichotkeys", "AppleSymbolicHotKeys", "-dict-add", SPOTLIGHT_KEY,
+    "<dict><key>enabled</key><false/><key>value</key><dict><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>1048576</integer></array><key>type</key><string>standard</string></dict></dict>"]);
+  execFileSync("/System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings", ["-u"], { timeout: 5000 });
+  log.info("[PlutoBar] Spotlight's ⌘Space turned off");
+}
+
+const defaultShortcut = () => (spotlightOwnsCommandSpace() ? "Alt+Space" : "Command+Space");
 const DEFAULT_SHORTCUT = "Alt+Space";
 
 let addon = null;
@@ -29,9 +54,10 @@ let loadFailed = false;
 let active = false;
 let shortcut = null;
 let hooks = {};
+let onShortcut = null;
 let prefsCache = null;
 
-// The query being shown, and what DigUp found for it so far.
+// The query being shown, and what file search found for it so far.
 let cur = { q: "", scope: "", seq: 0 };
 let files = { seq: -1, q: "", hits: [], meaning: false, code: false };
 let meaningTimer = null;
@@ -108,12 +134,11 @@ function savePrefs() {
 function setEnabled(on, options = {}) {
   active = !!on && !!load();
   clipboard.setEnabled(active && options.clipboard !== false);
-  setShortcut(active ? options.shortcut || DEFAULT_SHORTCUT : null);
+  setShortcut(active ? options.shortcut || defaultShortcut() : null);
   if (!active) {
     addon?.hide();
-    digup.service.stop();
   } else {
-    log.info("[PlutoBar] on (" + (shortcut || "no shortcut") + ")" + (digup.available() ? ", files through DigUp" : ", DigUp not found"));
+    log.info("[PlutoBar] on (" + (shortcut || "no shortcut") + ")" + (digup.available() ? ", searching inside files" : ", file names only until folders are indexed"));
     pushState();
   }
   return { active, shortcut, shortcutOk: !!shortcut };
@@ -124,7 +149,11 @@ function setShortcut(accel) {
   shortcut = null;
   if (!accel) return;
   try {
-    if (electron.globalShortcut.register(accel, () => show({ toggle: true }))) shortcut = accel;
+    const pressed = () => {
+      show({ toggle: true });
+      onShortcut?.();
+    };
+    if (electron.globalShortcut.register(accel, pressed)) shortcut = accel;
     else log.warn("[PlutoBar] " + accel + " is taken by another app");
   } catch (err) {
     log.warn("[PlutoBar] shortcut " + accel + ": " + err.message);
@@ -203,6 +232,8 @@ function onAction(a) {
       return hooks.stopSpeaking?.();
     case "clipboard":
       return clipboard.onChange(a);
+    case "setup":
+      return hooks.setup?.(a);
   }
 }
 
@@ -214,18 +245,19 @@ function pushState() {
       ? [{ id: "recent", kind: "recent", title: last.question, subtitle: last.reply ? last.reply.replace(/\s+/g, " ").slice(0, 90) : "Pluto", icon: { type: "orb" } }]
       : [];
   addon.state(JSON.stringify({ recent }));
-  if (digup.available()) {
-    digup.service
-      .status()
-      .then((s) => {
-        const total = (s.searchable || 0) + (s.pending || 0);
-        filesNote = s.pending > 0 && total ? "DigUp · indexing " + Math.floor((100 * (s.searchable || 0)) / total) + "%" : "DigUp";
-      })
-      .catch(() => {});
-  } else {
-    filesNote = "names only · install DigUp to search inside files";
-  }
+  filesNote = filesStatus();
 }
+
+// The Files section's note: how far file search has got.
+function filesStatus() {
+  const st = digup.status;
+  if (st.model.phase === "downloading") return "getting the search model · " + Math.floor(st.model.fraction * 100) + "%";
+  const total = st.searchable + st.pending;
+  if (st.pending > 0 && total) return "indexing · " + Math.floor((100 * st.searchable) / total) + "%";
+  if (!digup.available()) return "names only · choose folders in Settings → PlutoBar";
+  return "";
+}
+digup.onChange(() => (filesNote = filesStatus()));
 
 function onQuery({ q = "", scope = "", seq = 0, mode }) {
   if (mode === "conversation") return;
@@ -243,7 +275,7 @@ function onQuery({ q = "", scope = "", seq = 0, mode }) {
     spotlightFiles(words, seq);
     return;
   }
-  // DigUp's own rhythm: exact words at once, meaning when you pause.
+  // DigUp's rhythm: exact words at once, meaning when you pause.
   digup.service
     .search(words, { meaning: false, code, limit, prefixLast: true })
     .then((r) => seq === cur.seq && files.seq !== seq && setFiles(seq, r, false, code))
@@ -258,9 +290,9 @@ function onQuery({ q = "", scope = "", seq = 0, mode }) {
       .then((r) => {
         if (seq !== cur.seq) return;
         setFiles(seq, r, true, code);
-        if (r.warning) log.warn("[DigUp] " + r.warning);
+        if (r.warning) log.warn("[Search] " + r.warning);
       })
-      .catch((err) => log.warn("[DigUp] search: " + err.message));
+      .catch((err) => log.warn("[Search] " + err.message));
   }, 240);
 }
 
@@ -287,7 +319,7 @@ function pictures(seq) {
   }
 }
 
-// Without DigUp: file names through macOS's own index.
+// Before the folders are indexed: file names through macOS's own index.
 function spotlightFiles(words, seq) {
   const { execFile } = require("node:child_process");
   execFile("/usr/bin/mdfind", ["-onlyin", require("node:os").homedir(), "-name", words], { timeout: 2000, maxBuffer: 1 << 20 }, (err, out) => {
@@ -440,10 +472,7 @@ function open({ id, kind, reveal, copy }) {
           askVoice: () => hooks.askVoice?.(),
           openHistory: () => hooks.openHistory?.(),
           openSettings: () => hooks.openSettings?.(),
-          openDigUp: () => {
-            const app = digup.appPath();
-            app ? shell.openPath(app) : shell.openExternal("https://github.com/ARahim3/DigUp/releases/latest");
-          },
+          chooseFolders: () => hooks.chooseFolders?.(),
         });
       case "clip":
         if (!clipboard.restore(id) || copy) return;
@@ -460,8 +489,24 @@ function open({ id, kind, reveal, copy }) {
 }
 
 function quit() {
-  digup.service.stop();
+  digup.stop();
   clipboard.clear();
 }
 
-module.exports = { isAvailable, isEnabled: isActive, setEnabled, setActions, agentEvent, show, hide, quit, DEFAULT_SHORTCUT };
+module.exports = {
+  isAvailable,
+  isEnabled: isActive,
+  setEnabled,
+  setActions,
+  agentEvent,
+  show,
+  hide,
+  quit,
+  DEFAULT_SHORTCUT,
+  // The native module (load() starts it), for the setup window.
+  addon: () => load(),
+  shortcutStatus: () => ({ shortcut, shortcutOk: !!shortcut, spotlightConflict: shortcut === "Command+Space" && spotlightOwnsCommandSpace() }),
+  spotlightOwnsCommandSpace,
+  freeCommandSpace,
+  onShortcut: (fn) => (onShortcut = fn),
+};

@@ -13,7 +13,7 @@ const { WHISPER_MODELS, whisperModelPath, isWhisperModelReady } = require("./mod
 const log = require("../log");
 const READY_TIMEOUT_MS = 90_000;
 // Names Whisper tends to mishear; seeded into every prompt.
-const BASE_VOCABULARY = ["VoiceOS", "Claude", "Claude Code", "Codex", "ChatGPT", "Gemini"];
+const BASE_VOCABULARY = ["PlutoBar", "Pluto", "VoiceOS", "Claude", "Claude Code", "Codex", "ChatGPT", "Gemini"];
 
 let proc = null;
 let port = null;

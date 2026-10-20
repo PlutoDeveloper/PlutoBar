@@ -1,8 +1,8 @@
-# VoiceOS
+# PlutoBar
 
-A voice-first assistant for macOS that lives in **PlutoBar**, a Spotlight-style bar. Press ⌥Space and type, or hold a shortcut and talk: it types what you say into any app, or Claude does things on your Mac, like opening apps, drafting replies, playing music or checking reminders, and answers out loud.
+A Spotlight-style assistant for macOS (it grew out of VoiceOS). Press ⌥Space and type, or hold a shortcut and talk: it finds apps, actions, your clipboard and your files by what's in them, and otherwise it types what you say into any app, or Claude does things on your Mac, like opening apps, drafting replies, playing music or checking reminders, and answers out loud.
 
-- **Speech runs on your Mac.** Whisper large-v3 turbo for speech-to-text and Kokoro for the voice, both on-device and offline.
+- **Speech and file search run on your Mac.** Whisper large-v3 turbo for speech-to-text, Kokoro for the voice, and DigUp's engine with EmbeddingGemma 2 for finding files by what's in them, all on-device and offline.
 - **Claude is the brain.** It uses the Claude account you're already signed into in Claude Code, or an Anthropic API key.
 - **Nothing goes to the VoiceOS cloud.** Its servers, Supabase and telemetry are all blocked.
 
@@ -10,17 +10,20 @@ A voice-first assistant for macOS that lives in **PlutoBar**, a Spotlight-style 
 
 ```bash
 npm install
-npm run app      # build, sign and open "VoiceOS opensourced.app"
+npm run build:digup   # once: builds the file-search engine (llama.cpp needs CMake)
+npm run app           # build, sign and open "PlutoBar.app"
 ```
 
-Everything is set up inside the app. Until it's all ready, the **Dashboard** shows a **Finish setting up** checklist:
+The first launch opens **setup**, one step at a time like DigUp's:
 
-1. **Speech recognition:** downloads Whisper (~570 MB) once.
-2. **Reply voice:** downloads the Kokoro voice (~160 MB) once.
-3. **Claude:** detects your Claude Code sign-in automatically. If you're signed out, **Sign in** opens Anthropic's own sign-in page. If Claude Code isn't installed, **Install** links to the installer.
-4. **Microphone** and **Accessibility** permissions.
+1. **Welcome:** Get Started downloads the models once (Whisper ~570 MB, the Kokoro voice ~160 MB, the search model 865 MB), shown at the bottom of every later step.
+2. **Permissions:** Microphone and Accessibility.
+3. **Claude:** detects your Claude Code sign-in. **Sign In** opens Anthropic's own sign-in page; or paste an API key.
+4. **Files:** which folders to search, each with how many files it holds and how long its first pass takes; optionally your code. Indexing starts as you continue.
+5. **Shortcut:** pick one and press it to try it.
+6. **Ready:** things to try, and open at login.
 
-The checklist disappears once everything is done. Later changes live where you'd expect them:
+Run it again from the menu bar icon (Set Up PlutoBar…) or Settings → PlutoBar. Later changes live where you'd expect them:
 
 - **Settings → Claude:** account, Agent model (Haiku, Sonnet, Opus), the model for quick tasks, an optional API key
 - **Settings → Speech:** Whisper models, the reply voice engine, permissions
@@ -79,7 +82,7 @@ Weather and stock results show as cards in PlutoBar.
 **PlutoBar.** VoiceOS is a Spotlight-style bar (Liquid Glass, native SwiftUI in `resources/src/plutobar`), modeled on Spotlight with Siri in macOS 27. Press **⌥Space** (Settings → PlutoBar to change it) and type or say what you want. Whatever you type, it works out what you mean:
 
 - **A name:** apps ("saf" → Safari, "vsc" → Visual Studio Code, the ones you open most win ties), actions and your own Shortcuts, clipboard history, and your files.
-- **A description of a file:** found by what's in it through [DigUp](https://github.com/ARahim3/DigUp) (MIT), if it's installed: photos by what they show, screenshots by their text, PDFs at the page, recordings and videos at the moment ("zebra in a video" opens QuickTime at the zebra). Start with `code:` to search your code and open it in your editor at the line. PlutoBar runs DigUp's own `digup search-service` on DigUp's index and folder choices: exact words while you type, meaning when you pause. Without DigUp it matches file names through Spotlight.
+- **A description of a file:** found by what's in it, with [DigUp](https://github.com/ARahim3/DigUp)'s engine built in (MIT, in `resources/src/digup`; nothing to install separately): photos by what they show, screenshots by their text, PDFs at the page, recordings and videos at the moment ("zebra in a video" opens QuickTime at the zebra). Start with `code:` to search your code and open it in your editor at the line. PlutoBar runs the bundled `digup` tool the way DigUp's app does: `download-model` once, `index-service` to keep the folders you chose indexed (new files first, the first pass while on power, again a moment after anything changes), and `search-service` for exact words while you type and meaning when you pause. If DigUp itself was set up on the Mac, its model, index and folders are taken over on first launch (APFS clones: instant, no extra space). Until folders are indexed, file names come from Spotlight.
 - **A sum or a website:** "12% of 80" answers right there (Return copies it); "github.com" opens it.
 - **A question or a request:** **Ask Pluto** (Claude with all of VoiceOS's Mac tools) is offered on every query, and it's the top hit when the query reads like a request ("what's…", "remind me…", a question mark, a long phrase). Return asks; the answer streams in under the bar with its weather, stock and approval cards, and whatever you type next is a follow-up. ⌘N starts over. Pluto can also search your files itself (`search_files`, through DigUp).
 
@@ -106,11 +109,11 @@ src/
       settings.js        preferences (+ optional API key, Keychain-encrypted)
       identity.js        the local "account" (no login screen)
       networkGuard.js    blocks VoiceOS cloud, Supabase, PostHog, Sentry
-      assistant/         Claude: files.js (search_files via DigUp), claudeCode.js, claudeApi.js, toolBridge.js, prompts.js,
+      assistant/         Claude: files.js (search_files, on the built-in index), claudeCode.js, claudeApi.js, toolBridge.js, prompts.js,
                          tools.js (tool table + app_tool catalog), youtube.js,
                          youtubeTranscript.js, weather.js, stocks.js, x.js, musicApp.js,
                          macSystem.js, computer.js (computer use)
-      plutobar/          PlutoBar: index.js (routing + rows), digup.js (DigUp's search service),
+      plutobar/          PlutoBar: index.js (routing + rows), digup.js (file search: DigUp's engine),
                          apps.js, actions.js (actions, Shortcuts, calculator), clipboard.js
       agentEvents.js     the assistant's events, as PlutoBar shows them
       speech/            whisper.js, transcribe.js, tidy.js, tts.js (Kokoro), models.js
@@ -120,12 +123,13 @@ src/
 resources/
   bin/                 macOS helper binaries + whisper-server + ui-control
   src/ui-control/      Swift source of the computer-use helper
-  src/plutobar/        Swift source of PlutoBar (SwiftUI + Node-API addon)
+  src/plutobar/        Swift source of PlutoBar (SwiftUI + Node-API addon): the bar and setup
+  src/digup/           DigUp's search engine (MIT), built into bin/digup by scripts/build-digup.sh
   plutobar/            plutobar.node, built by scripts/build-plutobar.sh
   native/              native addons (window corners, location)
   build/               icon, tray icon, entitlements
   VoiceOS Music.app    Apple Music helper
-scripts/               package-app.sh · build-whisper.sh · build-ui-control.sh · build-plutobar.sh
+scripts/               package-app.sh · build-whisper.sh · build-ui-control.sh · build-plutobar.sh · build-digup.sh · brand/ (icon, wordmark)
   dev/                 backend-harness.js (`npm test`, no Electron or Claude needed) ·
                        launch-debug.sh + turn.sh + cdp.js (send a request to the running app
                        and print its tool calls and token use) · plutobar.sh (drive PlutoBar)
@@ -134,17 +138,18 @@ docs/                  original build spec
 
 ## Where your data lives
 
-`~/Library/Application Support/VoiceOS opensourced/` holds:
+`~/Library/Application Support/PlutoBar/` holds (moved there from `VoiceOS opensourced/` on the first launch after the rename):
 
 - `models/`: the speech and voice models
+- `Search/`: the search model and the index of your folders
 - `voiceos.db`: your dictation and assistant history
 - `config.json`: settings
 
-Logs are in `~/Library/Logs/VoiceOS opensourced/main.log`.
+Logs are in `~/Library/Logs/PlutoBar/main.log`; the indexer's in `Search/index.noindex/indexer.log`.
 
 ## Troubleshooting
 
-- **The shortcut does nothing:** check System Settings → Privacy & Security → Accessibility and make sure "VoiceOS opensourced" is on. Make sure you launched the app with `npm run app`.
+- **The shortcut does nothing:** check System Settings → Privacy & Security → Accessibility and make sure "PlutoBar" is on. Make sure you launched the app with `npm run app`.
 - **"Claude isn't connected":** open Settings → Claude. You can also run `claude auth status` in Terminal. If it says you're not logged in, run `claude auth login`.
 - **"You've reached your Claude plan's usage limit":** this is your plan's normal limit. It resets on Anthropic's schedule, or you can add an API key in Settings.
 

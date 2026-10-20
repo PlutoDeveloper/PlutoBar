@@ -1,8 +1,8 @@
 {
-  "name": "voiceos-opensourced",
-  "productName": "VoiceOS opensourced",
+  "name": "plutobar",
+  "productName": "PlutoBar",
   "version": "0.1.33",
-  "description": "VoiceOS \u2014 a voice-first macOS assistant with on-device speech and Claude",
+  "description": "PlutoBar: a Spotlight-style macOS assistant with on-device search, speech and Claude",
   "main": "./src/main/main.js",
   "license": "MIT",
   "author": {
@@ -15,11 +15,12 @@
     "build:whisper": "scripts/build-whisper.sh",
     "build:ui-control": "scripts/build-ui-control.sh",
     "build:plutobar": "scripts/build-plutobar.sh",
+    "build:digup": "scripts/build-digup.sh",
     "test": "node scripts/dev/backend-harness.js"
   },
   "build": {
     "appId": "com.voiceos.opensourced",
-    "productName": "VoiceOS opensourced",
+    "productName": "PlutoBar",
     "directories": {
       "output": "dist",
       "buildResources": "resources/build"
@@ -65,18 +66,18 @@
       "entitlementsInherit": "resources/build/entitlements.mac.plist",
       "extendInfo": {
         "LSUIElement": false,
-        "NSMicrophoneUsageDescription": "VoiceOS listens while you hold the voice shortcut so it can transcribe your speech.",
-        "NSAppleEventsUsageDescription": "VoiceOS controls apps you ask it to, such as opening apps or playing music.",
-        "NSCalendarsFullAccessUsageDescription": "VoiceOS reads and creates calendar events when you ask it to.",
-        "NSRemindersFullAccessUsageDescription": "VoiceOS reads and creates reminders when you ask it to.",
-        "NSLocationWhenInUseUsageDescription": "VoiceOS uses your location for weather and nearby places when you ask.",
-        "NSAppleMusicUsageDescription": "VoiceOS plays, searches and saves music in Apple Music when you ask it to."
+        "NSMicrophoneUsageDescription": "PlutoBar listens while you hold the voice shortcut so it can transcribe your speech.",
+        "NSAppleEventsUsageDescription": "PlutoBar controls apps you ask it to, such as opening apps or playing music.",
+        "NSCalendarsFullAccessUsageDescription": "PlutoBar reads and creates calendar events when you ask it to.",
+        "NSRemindersFullAccessUsageDescription": "PlutoBar reads and creates reminders when you ask it to.",
+        "NSLocationWhenInUseUsageDescription": "PlutoBar uses your location for weather and nearby places when you ask.",
+        "NSAppleMusicUsageDescription": "PlutoBar plays, searches and saves music in Apple Music when you ask it to."
       }
     },
     "asar": false,
     "protocols": [
       {
-        "name": "VoiceOS",
+        "name": "PlutoBar",
         "schemes": [
           "voiceos"
         ]
