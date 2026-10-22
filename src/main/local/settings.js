@@ -76,13 +76,23 @@ class Settings {
     this.emit();
   }
 
-  // Show in the Dock (the app's own setting).
+  // Show in the Dock (the app's own setting). PlutoBar runs in the
+  // background like Spotlight, so it's off unless you turn it on in Settings.
   showInDock() {
-    return (this.store.get(this.appSettingsKey) || {}).showInDock !== false;
+    const raw = this.store.get(STORE_KEY) || {};
+    if (!raw.dockChosen) return false;
+    return (this.store.get(this.appSettingsKey) || {}).showInDock === true;
   }
 
   setShowInDock(on) {
     this.store.set(this.appSettingsKey, { ...(this.store.get(this.appSettingsKey) || {}), showInDock: !!on });
+    this.store.set(STORE_KEY, { ...(this.store.get(STORE_KEY) || {}), dockChosen: true });
+  }
+
+  // The first time: VoiceOS's "show in Dock" default (on) becomes PlutoBar's (off).
+  backgroundByDefault() {
+    if ((this.store.get(STORE_KEY) || {}).dockChosen) return;
+    this.store.set(this.appSettingsKey, { ...(this.store.get(this.appSettingsKey) || {}), showInDock: false });
   }
 
   onChange(fn) {

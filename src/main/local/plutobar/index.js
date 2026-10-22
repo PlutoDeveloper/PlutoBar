@@ -21,6 +21,7 @@ const apps = require("./apps");
 const actions = require("./actions");
 const clipboard = require("./clipboard");
 const digup = require("./digup");
+const settingsPanes = require("./settingsPanes");
 
 // ⌘Space when Spotlight isn't using it, else ⌥Space.
 const SPOTLIGHT_KEY = "64"; // com.apple.symbolichotkeys: "Show Spotlight search"
@@ -428,6 +429,9 @@ function render(keepSelection = false) {
       else if (best && best.score >= 750 && askiness < 0.85) top = appRow(best);
       else if (askiness >= 0.7) top = askRow;
       else if (best && best.score >= 600) top = appRow(best);
+      // Settings panes ("privacy settings", "wifi"): a top hit when they're plainly what you typed.
+      const panes = settingsPanes.match(query, 3);
+      if (!top && panes[0] && panes[0].score >= 85) top = panes.shift();
       if (top?.value) reg.set(top.id, { type: "calc", value: top.value });
       if (top?.url) reg.set(top.id, { type: "url", url: top.url });
 
@@ -435,6 +439,7 @@ function render(keepSelection = false) {
       // Siri in Spotlight: answering is always on offer.
       if (top !== askRow) add("ask", "Pluto", [askRow]);
       add("apps", "Applications", appHits.filter((m) => !top || "app:" + m.app.path !== top.id).slice(0, 4).map(appRow));
+      add("settings", "Settings", panes.filter((p) => p.score >= 50));
       if (query.length >= 2) add("actions", "Actions", actions.match(query, 3));
       // When an app is plainly what you're after, files make room.
       if (!calc && !url) add("files", "Files", fileRows().slice(0, top && top.kind === "app" && !/\s/.test(query) ? 3 : 6), filesNote);
@@ -483,6 +488,8 @@ function open({ id, kind, reveal, copy }) {
         if (!clipboard.restore(id) || copy) return;
         // Into the app you were in, as if you'd pressed ⌘V there.
         return setTimeout(() => Promise.resolve(require("../assistant/computer").pressKeys("cmd+v")).catch(() => {}), 160);
+      case "setting":
+        return settingsPanes.open(id, { openPlutoSettings: (pane) => hooks.openSettings?.(pane) });
       case "calc":
         return electron.clipboard.writeText(String(entry?.value ?? "").replace(/,/g, ""));
       case "web":

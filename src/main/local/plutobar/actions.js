@@ -18,7 +18,6 @@ const BUILT_IN = [
   { id: "next", title: "Next Track", symbol: "forward", words: "next skip track song music", run: () => music("next track") },
   { id: "screenshot", title: "Take Screenshot", symbol: "camera.viewfinder", words: "screenshot capture screen grab", run: (c) => c.shell.openPath("/System/Applications/Utilities/Screenshot.app") },
   { id: "history", title: "Pluto History", symbol: "clock.arrow.circlepath", words: "history conversations past chats", run: (c) => c.openHistory() },
-  { id: "settings", title: "PlutoBar Settings", symbol: "gearshape", words: "settings preferences plutobar voiceos shortcut", run: (c) => c.openSettings() },
   { id: "folders", title: "Choose Folders to Search", symbol: "folder.badge.gearshape", words: "folders files search index digup", run: (c) => c.chooseFolders() },
 ];
 

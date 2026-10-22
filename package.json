@@ -65,7 +65,7 @@
       "entitlements": "resources/build/entitlements.mac.plist",
       "entitlementsInherit": "resources/build/entitlements.mac.plist",
       "extendInfo": {
-        "LSUIElement": false,
+        "LSUIElement": true,
         "NSMicrophoneUsageDescription": "PlutoBar listens while you hold the voice shortcut so it can transcribe your speech.",
         "NSAppleEventsUsageDescription": "PlutoBar controls apps you ask it to, such as opening apps or playing music.",
         "NSCalendarsFullAccessUsageDescription": "PlutoBar reads and creates calendar events when you ask it to.",

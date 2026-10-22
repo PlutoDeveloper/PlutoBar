@@ -104,7 +104,7 @@ class SearchService {
     // A service that keeps dying is left alone for a while.
     if (this.failures >= 3 && Date.now() - this.startedAt < 60_000) return false;
     const f = folders();
-    const args = ["search-service", "--index", indexDir(), ...folderArgs(f), "--encoder-idle", "300"];
+    const args = ["search-service", "--index", indexDir(), ...folderArgs(f), "--encoder-idle", "120"];
     this.startedAt = Date.now();
     const proc = spawn(binary(), args, { stdio: ["pipe", "pipe", "pipe"], env: env() });
     this.proc = proc;
@@ -229,6 +229,9 @@ const service = new SearchService();
 
 let indexer = null;
 let syncOwed = false;
+// Pruning (files under folders no longer chosen leave the index) needs a full
+// look at the index: once a session, and after the folders change.
+let pruneWanted = true;
 let watchers = [];
 let watchTimer = null;
 let periodic = null;
@@ -242,12 +245,18 @@ function startIndexer() {
   if (indexer || !binary() || paused) return;
   const f = folders();
   if (!f.roots.length && !f.codeRoots.length) return;
-  const args = ["index-service", "--index", indexDir(), "--prune"];
+  // It stays up (model loaded) for 3 minutes after its last file, so a burst of
+  // new files (screenshots, downloads) is read by one process, not one each.
+  const args = ["index-service", "--index", indexDir(), "--linger", "180"];
+  if (pruneWanted) args.push("--prune");
+  pruneWanted = false;
   if (onPower()) args.push("--backfill");
   args.push(...folderArgs(f));
   fs.mkdirSync(indexDir(), { recursive: true });
   const err = fs.openSync(path.join(indexDir(), "indexer.log"), "a");
-  const proc = spawn(binary(), args, { stdio: ["pipe", "pipe", err], env: env() });
+  // Background priority: efficiency cores and throttled disk, so indexing never
+  // competes with what you're doing (and costs less battery).
+  const proc = spawn("/usr/sbin/taskpolicy", ["-b", binary(), ...args], { stdio: ["pipe", "pipe", err], env: env() });
   fs.closeSync(err);
   indexer = proc;
   syncOwed = false;
@@ -314,18 +323,49 @@ function requestSync() {
   else startIndexer();
 }
 
-// Watches the folders (FSEvents, through fs.watch): a moment after things
-// settle (a copy in progress, a burst of screenshots), the indexer syncs.
+// Watches the folders (FSEvents, through fs.watch). The indexer syncs once
+// things have been quiet for 8 s (a download, a burst of screenshots), or
+// after a minute of steady change at most. Files still being written
+// (partial downloads, Office lock files) don't count.
+const NOISE = /(^|\/)(~\$|\.~lock)|\.(crdownload|download|part|partial|tmp|temp|swp|lock)$/i;
+let changedSince = 0;
+function changedFile() {
+  const now = Date.now();
+  if (!changedSince) changedSince = now;
+  clearTimeout(watchTimer);
+  const wait = Math.max(0, Math.min(8000, 60_000 - (now - changedSince)));
+  watchTimer = setTimeout(() => {
+    changedSince = 0;
+    requestSync();
+  }, wait);
+}
+
+// Code changes all the time while you work: like DigUp, the code index catches
+// up once a project has been quiet for a minute (10 minutes at most), and only
+// the code index syncs.
+let codeTimer = null;
+let codeChangedSince = 0;
+function changedCode() {
+  const now = Date.now();
+  if (!codeChangedSince) codeChangedSince = now;
+  clearTimeout(codeTimer);
+  codeTimer = setTimeout(() => {
+    codeChangedSince = 0;
+    if (indexer) send("sync code");
+    else startIndexer();
+  }, Math.max(0, Math.min(60_000, 600_000 - (now - codeChangedSince))));
+}
+
 function watch() {
   for (const w of watchers) w.close();
   watchers = [];
   const f = folders();
-  for (const root of [...f.roots, ...f.codeRoots]) {
+  const roots = [...f.roots.map((r) => [r, false]), ...f.codeRoots.map((r) => [r, true])];
+  for (const [root, code] of roots) {
     try {
       const w = fs.watch(root, { recursive: true }, (_event, file) => {
-        if (file && String(file).split("/").some((part) => part.startsWith("."))) return;
-        clearTimeout(watchTimer);
-        watchTimer = setTimeout(requestSync, 750);
+        if (file && (String(file).split("/").some((part) => part.startsWith(".")) || NOISE.test(String(file)))) return;
+        code ? changedCode() : changedFile();
       });
       w.on("error", () => {});
       watchers.push(w);
@@ -476,6 +516,7 @@ function start() {
 // The folders changed (setup, Settings): the indexer and the service follow.
 function foldersChanged() {
   const f = folders();
+  pruneWanted = true;
   service.setFolders(f);
   watch();
   if (indexer) {
@@ -510,6 +551,8 @@ function stop() {
   for (const w of watchers) w.close();
   watchers = [];
   clearInterval(periodic);
+  clearTimeout(watchTimer);
+  clearTimeout(codeTimer);
   send("stop");
   download?.kill();
   service.stop();

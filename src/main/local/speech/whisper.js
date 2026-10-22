@@ -84,6 +84,7 @@ function ensureStarted(id) {
     await waitUntilReady(port, child);
     lastError = null;
     log.info("[LocalSTT] whisper-server ready (" + WHISPER_MODELS[id].label + ") in " + (Date.now() - t0) + "ms on port " + port);
+    touch();
   })().catch((err) => {
     lastError = err.message;
     stop();
@@ -92,7 +93,22 @@ function ensureStarted(id) {
   return readyPromise;
 }
 
+// Whisper holds ~650 MB while loaded: it goes after 15 minutes without
+// dictation, and loads again (about a second) the next time you talk.
+const IDLE_MS = 15 * 60_000;
+let idleTimer = null;
+function touch() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (!proc) return;
+    log.info("[LocalSTT] whisper-server idle: unloading");
+    stop();
+  }, IDLE_MS);
+  idleTimer.unref?.();
+}
+
 async function transcribeWav(wav, { id, language, vocabulary = [], signal } = {}) {
+  touch();
   await ensureStarted(id);
   const form = new FormData();
   form.append("file", new Blob([wav], { type: "audio/wav" }), "speech.wav");

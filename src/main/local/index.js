@@ -82,6 +82,7 @@ function attachStore(store, STORE_KEYS) {
   identity.init(store, STORE_KEYS);
   skipLegacyOnboarding(store, STORE_KEYS);
   settings = new Settings(store, STORE_KEYS);
+  settings.backgroundByDefault();
   settings.onChange(pushState);
   return settings;
 }
@@ -126,7 +127,7 @@ function onReady(readyHooks = {}) {
   plutobar.setActions({
     ...hooks.notchActions,
     stopSpeaking: () => voiceClient?.stopSpeaking(),
-    openSettings: () => openSettings("plutobar"),
+    openSettings: (pane) => settingsWindow.show(typeof pane === "string" ? pane : "general"),
     setup: (a) => setup.handle(a),
     settings: (a) => settingsWindow.handle(a),
     prefs: () => settings.plutobar(),
@@ -183,6 +184,8 @@ function onReady(readyHooks = {}) {
   refreshClaude().finally(() => hooks.onStateChanged?.());
   setTimeout(warmUp, 2500);
   applyPlutobar();
+  // A background app (LSUIElement): the Dock icon only if you asked for it.
+  if (settings.showInDock()) electron.app.dock?.show();
   startFileSearch().catch((err) => log.warn("[Search] " + err.message));
   // First launch: the setup window (after the other windows have come up).
   if (plutobar.isEnabled() && !settings.plutobar().setupDone) setTimeout(() => setup.show(), 1500);
