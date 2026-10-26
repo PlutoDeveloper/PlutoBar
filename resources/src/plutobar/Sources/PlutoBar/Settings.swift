@@ -312,11 +312,11 @@ private struct SearchPane: View {
             Button("Download Search Model") { m.act("downloadModel") }
           }
         }
-        Toggle("Do the first pass on battery too", isOn: m.bool(s, "onBattery", "onBattery"))
+        Toggle("Index on battery too", isOn: m.bool(s, "onBattery", "onBattery"))
       } header: {
         Text("Index")
       } footer: {
-        Note(text: "New files are read a moment after they appear, on any power source. The first pass of a big folder waits for power unless you turn that on.")
+        Note(text: "On battery, PlutoBar keeps file names up to date and waits for power to read what's in new files (pictures, PDFs, videos), which is the part that uses the most energy. Turn this on to read them right away.")
       }
       Section {
         ForEach(m.folders) { f in FolderLine(folder: f) { m.act("removeFolder", ["path": f.path]) } }

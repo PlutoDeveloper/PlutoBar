@@ -182,11 +182,15 @@ function onReady(readyHooks = {}) {
   electron.app.on("will-quit", () => tts.stop());
   electron.app.on("browser-window-focus", () => refreshClaude().catch(() => {}));
   refreshClaude().finally(() => hooks.onStateChanged?.());
-  setTimeout(warmUp, 2500);
+  // Whisper (~650 MB) and the reply voice are preloaded only on power: on
+  // battery they load the first time you talk (about 0.6 s more, once).
+  setTimeout(() => (require("./power").onBattery() ? log.info("[VoiceOS] on battery: speech loads on first use") : warmUp()), 2500);
   applyPlutobar();
   // A background app (LSUIElement): the Dock icon only if you asked for it.
   if (settings.showInDock()) electron.app.dock?.show();
   startFileSearch().catch((err) => log.warn("[Search] " + err.message));
+  // Diagnostics: which window's renderer uses CPU (PLUTOBAR_PERF=1, after 90 s).
+  if (process.env.PLUTOBAR_PERF === "1") setInterval(logWindowCpu, 60_000);
   // First launch: the setup window (after the other windows have come up).
   if (plutobar.isEnabled() && !settings.plutobar().setupDone) setTimeout(() => setup.show(), 1500);
 }
@@ -328,6 +332,16 @@ function updateTray() {
   if (Date.now() - trayRebuildAt > 4000) {
     trayRebuildAt = Date.now();
     hooks.onStateChanged?.();
+  }
+}
+
+function logWindowCpu() {
+  const metrics = new Map(electron.app.getAppMetrics().map((m) => [m.pid, m]));
+  for (const m of metrics.values()) if (m.type !== "Browser" && (m.cpu?.percentCPUUsage ?? 0) > 2) log.info("[Perf] busy " + m.type + " pid=" + m.pid + " cpu=" + m.cpu.percentCPUUsage.toFixed(1) + "% " + (m.name || m.serviceName || ""));
+  for (const w of electron.BrowserWindow.getAllWindows()) {
+    const pid = w.webContents.getOSProcessId();
+    const m = metrics.get(pid);
+    log.info("[Perf] window '" + w.getTitle() + "' visible=" + w.isVisible() + " opacity=" + w.getOpacity() + " pid=" + pid + " cpu=" + (m?.cpu?.percentCPUUsage ?? 0).toFixed(1) + "% wakeups=" + (m?.cpu?.idleWakeupsPerSecond ?? 0) + "/s url=" + w.webContents.getURL().slice(-60));
   }
 }
 
@@ -612,6 +626,9 @@ module.exports = {
     plutobar.isEnabled() && agentEvents.translate(channel, data, ctx, plutobar.agentEvent),
   // PlutoBar owns the assistant, so the original notch draws nothing at the top.
   nativeNotchOwnsTop: () => plutobar.isEnabled(),
+  // PlutoBar starts in the menu bar, without the main window (unless it's off,
+  // or setup isn't done: then the window has the setup card).
+  startsInBackground: () => settings.plutobar().enabled && settings.plutobar().setupDone,
   // PlutoBar's own Settings window (the tray's Settings).
   openPlutoSettings: (pane) => settingsWindow.show(pane),
   // The menu bar icon: indexing progress next to it.

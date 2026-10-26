@@ -6459,7 +6459,11 @@ function recomputeBaseTick() {
     (timer$2 = setInterval(runDueTasks, baseTickMs)),
     timer$2.unref?.());
 }
+// [local-runtime] Window positioners only matter when a display changes (and
+// PlutoBar keeps those windows invisible): 1.5 s instead of 4 wakeups a second.
+const RELAXED_POLL_TASKS = new Set(["pillPositioner", "agentNotchPositioner", "agentHistoryNotchPositioner"]);
 function registerPolledTask(_0x422ab6, _0x329013, _0x1a4b79) {
+  RELAXED_POLL_TASKS.has(_0x422ab6) && (_0x329013 = Math.max(_0x329013, 1500));
   const _0x53ac23 = _0x46b2d0,
     _0x1faf23 = {
       label: _0x422ab6,
@@ -15234,6 +15238,7 @@ function shouldAgentNotchBeVisible() {
 }
 function shouldHistoryNotchBeVisible() {
   const _0x4959fa = _0x46b2d0;
+  if (localRuntime.nativeNotchOwnsTop()) return false; // [local-runtime] PlutoBar: no notch history drawer (it rendered while invisible)
   if (isIntroOverlayPresentationActive()) return false;
   if (getOnboardingHistorySpotlightRequest()) return !false;
   const { completed: _0x1b4239, step: _0x227b77 } = getOnboardingNotchGate();
@@ -126564,7 +126569,7 @@ electron.app.whenReady().then(async () => {
       _0x3b0b88?.appearanceTheme,
     );
   } catch {}
-  (startStallDetector(),
+  (process.env.PLUTOBAR_STALL_DIAGNOSTICS === "1" && startStallDetector(), // [local-runtime] a debugging aid: 5 wakeups a second
     startMemorySampler(),
     startMainThreadBlocker(),
     startStallAttributionDiagnostics(),
@@ -126782,7 +126787,7 @@ electron.app.whenReady().then(async () => {
         store$1.get(STORE_KEYS.ONBOARDING)?.onboardingCompleted === !false,
     }),
     _0x2cf5f1 = maybeShowIntroOverlay(
-      () => createAppWindow({ startHidden: _0x43c166 }),
+      () => createAppWindow({ startHidden: _0x43c166 || localRuntime.startsInBackground() /*[local-runtime] PlutoBar lives in the menu bar*/ }),
       showIntroNotchWelcome,
       submitIntroNotchName,
       submitIntroNotchLanguage,
@@ -126792,7 +126797,7 @@ electron.app.whenReady().then(async () => {
     );
   _0x2cf5f1
     ? suspendOnboardingGuideForIntroOverlay()
-    : createAppWindow({ startHidden: _0x43c166 });
+    : createAppWindow({ startHidden: _0x43c166 || localRuntime.startsInBackground() /*[local-runtime] PlutoBar lives in the menu bar*/ });
   (createPillWindow(),
     startPillPositioner(),
     createAgentNotchWindow(),

@@ -24,6 +24,7 @@ const readline = require("node:readline");
 const { spawn, execFile } = require("node:child_process");
 const electron = require("electron");
 const log = require("../log");
+const power = require("../power");
 
 const HOME = os.homedir();
 const MODEL_FILES = [
@@ -238,8 +239,9 @@ let periodic = null;
 let started = false;
 
 let paused = false;
+let indexerPlugged = true; // the running indexer was started on power
 // The first pass ("backfill") runs on power, or on battery too when that's chosen.
-const onPower = () => folders().onBattery === true || !electron.powerMonitor.isOnBatteryPower();
+const onPower = () => folders().onBattery === true || !power.onBattery();
 
 function startIndexer() {
   if (indexer || !binary() || paused) return;
@@ -250,7 +252,12 @@ function startIndexer() {
   const args = ["index-service", "--index", indexDir(), "--linger", "180"];
   if (pruneWanted) args.push("--prune");
   pruneWanted = false;
-  if (onPower()) args.push("--backfill");
+  // On battery (unless you allow it): names only. Reading what's in files, the
+  // model's work (a video is hundreds of frames), waits for power.
+  const plugged = onPower();
+  indexerPlugged = plugged;
+  if (plugged) args.push("--backfill");
+  else args.push("--new-limit", "0");
   args.push(...folderArgs(f));
   fs.mkdirSync(indexDir(), { recursive: true });
   const err = fs.openSync(path.join(indexDir(), "indexer.log"), "a");
@@ -323,9 +330,10 @@ function requestSync() {
   else startIndexer();
 }
 
-// Watches the folders (FSEvents, through fs.watch). The indexer syncs once
-// things have been quiet for 8 s (a download, a burst of screenshots), or
-// after a minute of steady change at most. Files still being written
+// Watches the folders (FSEvents, through fs.watch). A sync walks every chosen
+// folder (seconds of CPU for big ones), so it waits for things to settle: 8 s
+// of quiet on power (a minute of steady change at most), a minute on battery
+// (ten at most). Files still being written
 // (partial downloads, Office lock files) don't count.
 const NOISE = /(^|\/)(~\$|\.~lock)|\.(crdownload|download|part|partial|tmp|temp|swp|lock)$/i;
 let changedSince = 0;
@@ -333,7 +341,10 @@ function changedFile() {
   const now = Date.now();
   if (!changedSince) changedSince = now;
   clearTimeout(watchTimer);
-  const wait = Math.max(0, Math.min(8000, 60_000 - (now - changedSince)));
+  const battery = power.onBattery();
+  const quiet = battery ? 60_000 : 8000;
+  const longest = battery ? 600_000 : 60_000;
+  const wait = Math.max(0, Math.min(quiet, longest - (now - changedSince)));
   watchTimer = setTimeout(() => {
     changedSince = 0;
     requestSync();
@@ -504,14 +515,28 @@ function start() {
   if (!f.roots.length && !f.codeRoots.length) return;
   if (!started) {
     started = true;
-    electron.powerMonitor.on("on-ac", () => (indexer ? send("backfill on") : startIndexer()));
-    electron.powerMonitor.on("on-battery", () => send("backfill off"));
-    periodic = setInterval(requestSync, 30 * 60_000);
+    power.onChange((battery) => {
+      if (!battery) {
+        // Plugged in: what waited gets read (a battery-time indexer is replaced).
+        if (!indexer) return startIndexer();
+        if (indexerPlugged) return send("backfill on");
+        syncOwed = true;
+        return send("stop");
+      }
+      // Unplugged: finish the current file and stop reading.
+      if (folders().onBattery === true) return send("backfill off");
+      send("stop");
+    });
+    // A safety net for changes FSEvents missed: every 2 hours, on power only.
+    periodic = setInterval(() => power.onBattery() || requestSync(), 2 * 3600_000);
   }
   watch();
   if (!modelReady()) downloadModel();
-  requestSync();
+  // Not in the busy first minute after login: a minute and a half later.
+  clearTimeout(firstSync);
+  firstSync = setTimeout(requestSync, 90_000);
 }
+let firstSync = null;
 
 // The folders changed (setup, Settings): the indexer and the service follow.
 function foldersChanged() {
@@ -553,6 +578,7 @@ function stop() {
   clearInterval(periodic);
   clearTimeout(watchTimer);
   clearTimeout(codeTimer);
+  clearTimeout(firstSync);
   send("stop");
   download?.kill();
   service.stop();

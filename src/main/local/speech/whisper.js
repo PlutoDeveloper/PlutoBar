@@ -93,9 +93,9 @@ function ensureStarted(id) {
   return readyPromise;
 }
 
-// Whisper holds ~650 MB while loaded: it goes after 15 minutes without
-// dictation, and loads again (about a second) the next time you talk.
-const IDLE_MS = 15 * 60_000;
+// Whisper holds ~650 MB and wakes ~100 times a second while loaded: it goes
+// after 5 minutes without dictation, and loads again (about 0.6 s) when you talk.
+const IDLE_MS = 5 * 60_000;
 let idleTimer = null;
 function touch() {
   clearTimeout(idleTimer);

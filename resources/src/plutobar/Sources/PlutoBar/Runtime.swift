@@ -15,7 +15,9 @@ final class PlutoRuntime {
     // Clipboard history: tell JS each time something new is copied. Copies a
     // password manager marks concealed or transient are never kept
     // (nspasteboard.org conventions).
-    pasteboardTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.checkPasteboard() }
+    pasteboardTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.checkPasteboard() }
+    // Tolerance lets macOS fold this into other wakeups (less energy).
+    pasteboardTimer?.tolerance = 0.5
     // scripts/dev: `plutobar.sh show {json}` / `plutobar.sh hide`.
     DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name("com.voiceos.plutobar.debug"), object: nil, queue: .main) { [weak self] note in
       let parts = (note.object as? String ?? "").split(separator: " ", maxSplits: 1).map(String.init)
