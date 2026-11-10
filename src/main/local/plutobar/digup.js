@@ -3,7 +3,10 @@
 // Rahim) finds the files on this Mac by what's in them, with Google DeepMind's
 // EmbeddingGemma 2 running on-device. PlutoBar ships its `digup` tool and runs
 // it the way DigUp's own app does:
-//   download-model   the model (865 MB, once) into PlutoBar's folder
+//   download-model   the model, once, into PlutoBar's folder: on macOS 27 the
+//                    Neural Engine build (1.49 GB, Core AI; it runs on the
+//                    ANE, not the GPU, for a fraction of the power), else the
+//                    llama.cpp one for the GPU (865 MB)
 //   index-service    keeps the index in step with the folders you chose: new
 //                    files first, the first pass ("backfill") while on power,
 //                    again a moment after anything in them changes
@@ -31,13 +34,27 @@ const MODEL_FILES = [
   { name: "embeddinggemma-2-Q8_0.gguf", bytes: 309_855_456 },
   { name: "mmproj-embeddinggemma-2-Q8_0.gguf", bytes: 554_821_024 },
 ];
-const MODEL_BYTES = MODEL_FILES.reduce((n, f) => n + f.bytes, 0);
+// The Neural Engine model (resources/src/digup/Sources/AneRuntime/AneModels.swift):
+// what has to be there for the engine to use it.
+const ANE_FILES = [
+  { name: "host/tokenizer.json", bytes: 32_170_510 },
+  { name: "host/tokenizer_config.json", bytes: 1599 },
+  { name: "host/config.json", bytes: 4455 },
+  { name: "host/embed_tokens.safetensors", bytes: 268_435_637 },
+  { name: "text_embeds_s320/text_embeds_s320.aimodel/main.mlirb", bytes: 290_900_383 },
+  { name: "vision_s280/vision_s280.aimodel/main.mlirb", bytes: 307_191_762 },
+  { name: "audio_s280/audio_s280.aimodel/main.mlirb", bytes: 588_591_673 },
+];
+// Core AI, which runs it, is macOS 27 and later (Darwin 27).
+const NEURAL_ENGINE = process.platform === "darwin" && Number(os.release().split(".")[0]) >= 27 && process.env.DIGUP_RUNTIME !== "llama";
+const MODEL_BYTES = NEURAL_ENGINE ? 1_487_308_424 : MODEL_FILES.reduce((n, f) => n + f.bytes, 0);
 const DIGUP_APP_DATA = path.join(HOME, "Library/Application Support/DigUp");
 
 // ------------------------------------------------------------ places
 
 const home = () => path.join(electron.app.getPath("userData"), "Search");
 const modelsDir = () => path.join(home(), "Models");
+const aneDir = () => path.join(home(), "ANE");
 const indexDir = () => path.join(home(), "index.noindex");
 
 function binary() {
@@ -45,11 +62,11 @@ function binary() {
   return fs.existsSync(p) ? p : null;
 }
 
-const env = () => ({ ...process.env, DIGUP_HOME: home(), DIGUP_MODELS: modelsDir() });
+const env = () => ({ ...process.env, DIGUP_HOME: home(), DIGUP_MODELS: modelsDir(), DIGUP_ANE_MODELS: aneDir() });
 const hasIndex = () => fs.existsSync(path.join(indexDir(), "index.sqlite"));
 
-function modelReady(dir = modelsDir()) {
-  return MODEL_FILES.every((f) => {
+function filesThere(dir, files) {
+  return files.every((f) => {
     try {
       return fs.statSync(path.join(dir, f.name)).size === f.bytes;
     } catch {
@@ -57,6 +74,12 @@ function modelReady(dir = modelsDir()) {
     }
   });
 }
+
+// The model this Mac runs is here: the Neural Engine one on macOS 27 (the
+// engine picks it by itself once it's complete), else the GPU one.
+const llamaReady = (dir = modelsDir()) => filesThere(dir, MODEL_FILES);
+const aneReady = () => filesThere(aneDir(), ANE_FILES);
+const modelReady = () => (NEURAL_ENGINE ? aneReady() : llamaReady());
 
 // The folders searched (settings.files(), handed in by setFolderSource).
 let folderSource = () => ({ roots: [], skipped: [], types: [], codeRoots: [], codeSkipped: [] });
@@ -243,15 +266,19 @@ let indexerPlugged = true; // the running indexer was started on power
 // The first pass ("backfill") runs on power, or on battery too when that's chosen.
 const onPower = () => folders().onBattery === true || !power.onBattery();
 
-function startIndexer() {
+// paths: what changed, synced instead of walking every folder (after a full
+// walk this session, and when the folders didn't change since).
+function startIndexer(paths = null) {
   if (indexer || !binary() || paused) return;
   const f = folders();
   if (!f.roots.length && !f.codeRoots.length) return;
   // It stays up (model loaded) for 3 minutes after its last file, so a burst of
   // new files (screenshots, downloads) is read by one process, not one each.
   const args = ["index-service", "--index", indexDir(), "--linger", "180"];
+  const partial = paths && paths.length && !pruneWanted && !syncOwed && fullSynced;
   if (pruneWanted) args.push("--prune");
   pruneWanted = false;
+  if (partial) for (const p of paths) args.push("--changed", p);
   // On battery (unless you allow it): names only. Reading what's in files, the
   // model's work (a video is hundreds of frames), waits for power.
   const plugged = onPower();
@@ -297,6 +324,10 @@ function counts(e) {
 let lastReloadAt = 0;
 function indexEvent(e) {
   if (e.code) return;
+  if (e.event === "sync") {
+    if (!e.partial) fullSynced = true;
+    log.info("[Search] sync of " + (e.partial ? "what changed" : "every folder") + ": " + e.ms + " ms (" + (e.added || 0) + " new, " + (e.changed || 0) + " changed, " + (e.removed || 0) + " gone)");
+  }
   switch (e.event) {
     case "sync":
     case "idle":
@@ -326,8 +357,24 @@ function send(command) {
 }
 
 function requestSync() {
+  changedPaths.clear();
+  changedOverflow = false;
   if (indexer) send("sync");
   else startIndexer();
+}
+
+// Just the places that changed (FSEvents paths), not every folder: a new
+// screenshot costs a look at its folder instead of a walk of all of them.
+// Until a full walk has run this session, or past 200 paths, a full sync.
+const changedPaths = new Set();
+let changedOverflow = false;
+let fullSynced = false;
+function syncChanged() {
+  if (!fullSynced || changedOverflow || !changedPaths.size) return requestSync();
+  const paths = [...changedPaths];
+  changedPaths.clear();
+  if (indexer) for (const p of paths) send("changed " + p);
+  else startIndexer(paths);
 }
 
 // Watches the folders (FSEvents, through fs.watch). A sync walks every chosen
@@ -337,7 +384,9 @@ function requestSync() {
 // (partial downloads, Office lock files) don't count.
 const NOISE = /(^|\/)(~\$|\.~lock)|\.(crdownload|download|part|partial|tmp|temp|swp|lock)$/i;
 let changedSince = 0;
-function changedFile() {
+function changedFile(file) {
+  if (file) changedPaths.size < 200 ? changedPaths.add(file) : (changedOverflow = true);
+  else changedOverflow = true;
   const now = Date.now();
   if (!changedSince) changedSince = now;
   clearTimeout(watchTimer);
@@ -347,7 +396,7 @@ function changedFile() {
   const wait = Math.max(0, Math.min(quiet, longest - (now - changedSince)));
   watchTimer = setTimeout(() => {
     changedSince = 0;
-    requestSync();
+    syncChanged();
   }, wait);
 }
 
@@ -376,7 +425,7 @@ function watch() {
     try {
       const w = fs.watch(root, { recursive: true }, (_event, file) => {
         if (file && (String(file).split("/").some((part) => part.startsWith(".")) || NOISE.test(String(file)))) return;
-        code ? changedCode() : changedFile();
+        code ? changedCode() : changedFile(file ? path.join(root, String(file)) : null);
       });
       w.on("error", () => {});
       watchers.push(w);
@@ -394,8 +443,10 @@ function downloadModel() {
     status.model = { phase: "ready", fraction: 1, text: "" };
     return changed();
   }
-  fs.mkdirSync(modelsDir(), { recursive: true });
-  const proc = spawn(binary(), ["download-model", "--to", modelsDir()], { stdio: ["ignore", "pipe", "pipe"], env: env() });
+  const dir = NEURAL_ENGINE ? aneDir() : modelsDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const args = ["download-model", ...(NEURAL_ENGINE ? ["--ane"] : []), "--to", dir];
+  const proc = spawn(binary(), args, { stdio: ["ignore", "pipe", "pipe"], env: env() });
   download = proc;
   status.model = { phase: "downloading", fraction: 0, text: "" };
   changed();
@@ -415,9 +466,14 @@ function downloadModel() {
     download = null;
     if (code === 0 && modelReady()) {
       status.model = { phase: "ready", fraction: 1, text: "" };
-      log.info("[Search] model ready");
+      log.info("[Search] model ready" + (NEURAL_ENGINE ? " (Neural Engine)" : ""));
       service.restart();
-      requestSync();
+      // A running indexer holds the old model: it finishes its file and a new
+      // one starts with this one (the engine re-reads files for the new vectors).
+      if (indexer) {
+        syncOwed = true;
+        send("stop");
+      } else requestSync();
     } else if (status.model.phase !== "failed") {
       status.model = { phase: "failed", fraction: 0, text: "Download failed" };
     }
@@ -456,7 +512,8 @@ function clone(from, to) {
 async function importDigUp() {
   try {
     const theirModels = path.join(DIGUP_APP_DATA, "Models");
-    if (!modelReady() && modelReady(theirModels)) {
+    // Their GPU model only helps where the Neural Engine one can't run.
+    if (!NEURAL_ENGINE && !llamaReady() && llamaReady(theirModels)) {
       for (const f of MODEL_FILES) clone(path.join(theirModels, f.name), path.join(modelsDir(), f.name));
       log.info("[Search] took over DigUp's model");
       status.model = { phase: "ready", fraction: 1, text: "" };
@@ -534,7 +591,7 @@ function start() {
   if (!modelReady()) downloadModel();
   // Not in the busy first minute after login: a minute and a half later.
   clearTimeout(firstSync);
-  firstSync = setTimeout(requestSync, 90_000);
+  firstSync = setTimeout(() => fullSynced || requestSync(), 90_000);
 }
 let firstSync = null;
 
@@ -732,4 +789,5 @@ module.exports = {
   openHit,
   where,
   MODEL_BYTES,
+  NEURAL_ENGINE,
 };

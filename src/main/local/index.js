@@ -18,6 +18,7 @@ const { Settings } = require("./settings");
 const { LocalVoiceOSClient } = require("./backend");
 const assistant = require("./assistant");
 const whisper = require("./speech/whisper");
+const appleSpeech = require("./speech/appleSpeech");
 const tts = require("./speech/tts");
 const models = require("./speech/models");
 const { pcm16ToWav } = require("./speech/transcribe");
@@ -230,12 +231,21 @@ async function refreshClaude() {
 // -------------------------------------------------------------- speech
 
 let warmedModel = null;
+// Dictation's language arrives with each request; ahead of that, this Mac's.
+const speechLanguage = () => null;
 
 // Keeps Whisper (and Kokoro, if replies are spoken) loaded so the first
 // dictation after launch is instant.
 function warmUp() {
   const { whisperModel } = settings.read().speech;
   const speakReplies = settings.voice().enabled;
+  // Apple's speech model: nothing to keep loaded (macOS's speech service runs
+  // it); only make sure the language's model is installed.
+  if (appleSpeech.available()) {
+    appleSpeech.prepare(speechLanguage()).then(pushState);
+    if (speakReplies && tts.isModelDownloaded()) tts.ensureReady().then(pushState, pushState);
+    return;
+  }
   log.info("[VoiceOS] warm-up: whisper=" + whisperModel + (models.isWhisperModelReady(whisperModel) ? " (downloaded)" : " (not downloaded)") + " voice=" + (speakReplies ? "on" : "off"));
   if (models.isWhisperModelReady(whisperModel) && warmedModel !== whisperModel) {
     warmedModel = whisperModel;
@@ -346,7 +356,8 @@ function logWindowCpu() {
 }
 
 async function downloadSpeech() {
-  await Promise.all([downloadWhisper(settings.read().speech.whisperModel), settings.voice().enabled ? downloadVoice() : null]);
+  const stt = appleSpeech.available() ? appleSpeech.prepare(speechLanguage()) : downloadWhisper(settings.read().speech.whisperModel);
+  await Promise.all([stt, settings.voice().enabled ? downloadVoice() : null]);
 }
 
 // ---------------------------------------------------------------- Claude
@@ -383,7 +394,7 @@ function state() {
   const t = tts.status();
   const voice = settings.voice();
   const perms = permissions();
-  const whisperReady = models.isWhisperModelReady(s.speech.whisperModel);
+  const whisperReady = models.isWhisperModelReady(s.speech.whisperModel) || (appleSpeech.available() && !appleSpeech.status().lastError);
   return {
     ...s,
     voice,

@@ -23,7 +23,10 @@ public struct CrawlReport: Sendable {
 /// For the code index (`IndexOptions.code`) it walks the code folders instead: code files only (`Rules.classifyCode`),
 /// in a git repo only those git keeps (`GitFiles`), and none in vendored or built folders.
 public enum Crawler {
-    public static func crawl(_ roots: [URL], options: IndexOptions) -> CrawlReport {
+    /// [PlutoBar] `chosen`: the chosen folders when `roots` are only parts of them (`Indexer.sync(changed:within:)`),
+    /// for the rules that look at a folder's place in its chosen folder. `shallow`: roots walked one level only.
+    public static func crawl(_ roots: [URL], options: IndexOptions, chosen: Set<String>? = nil,
+                             shallow: Set<String> = []) -> CrawlReport {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
         let keys = FileSystem.crawlKeys
@@ -32,13 +35,23 @@ public enum Crawler {
         var repos = GitRepos()
         var found: [Candidate] = []
         var foundPaths = Set<String>()   // a folder inside another root would be walked twice
-        let rootPaths = Set(roots.map { $0.standardizedFileURL.path })
+        let rootPaths = chosen ?? Set(roots.map { $0.standardizedFileURL.path })
 
         for root in roots.map({ $0.standardizedFileURL }) {
             if options.code {
                 repos.enterRoot(root.path)
             } else if Rules.isProjectRoot(root.path) {
                 projectRoots.insert(root.path)
+            }
+            // A part of a chosen folder: the code projects it's inside count too.
+            // (`chosen` and `shallow` are real paths; a standardized URL may say /tmp for /private/tmp.)
+            let rootReal = chosen == nil ? root.path : FolderSelection.realPath(root.path)
+            if !options.code, let chosen, !chosen.contains(rootReal) {
+                var folder = (rootReal as NSString).deletingLastPathComponent
+                while chosen.contains(where: { folder == $0 || FolderSelection.isInside(folder, $0) }) {
+                    if Rules.isProjectRoot(folder) { projectRoots.insert(folder) }
+                    folder = (folder as NSString).deletingLastPathComponent
+                }
             }
             // A skip applies inside the chosen folders that contain it: a folder chosen inside a skipped one is
             // walked whole (`FolderSelection`). The walk reports real paths (/private/var, where the root says /var).
@@ -50,7 +63,9 @@ public enum Crawler {
             guard let walker = FileSystem.walk(root) else { continue }
             #else
             guard let walker = fm.enumerator(at: root, includingPropertiesForKeys: keys,
-                                             options: [.skipsHiddenFiles, .skipsPackageDescendants],
+                                             options: shallow.contains(rootReal)
+                                                ? [.skipsHiddenFiles, .skipsPackageDescendants, .skipsSubdirectoryDescendants]
+                                                : [.skipsHiddenFiles, .skipsPackageDescendants],
                                              errorHandler: { _, _ in true }) else { continue }
             #endif
             func visit(_ url: URL) {

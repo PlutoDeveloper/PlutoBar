@@ -78,7 +78,7 @@ function searchState(counts) {
   } else if (st.model.phase === "downloading") {
     headline = "Getting the search model · " + Math.floor(st.model.fraction * 100) + "%";
     progress = st.model.fraction;
-    detail = "865 MB, once. File names are searchable meanwhile.";
+    detail = (fileSearch.NEURAL_ENGINE ? "1.5 GB, once, for the Neural Engine." : "865 MB, once.") + " File names are searchable meanwhile.";
   } else if (fileSearch.isPaused()) {
     headline = "Indexing paused";
     detail = total ? st.searchable.toLocaleString() + " of " + total.toLocaleString() + " files searchable." : "";

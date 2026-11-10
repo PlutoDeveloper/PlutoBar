@@ -11,7 +11,10 @@ import WinSDK
 /// screenshots, and stayed there), and all of it goes back to the system when this process exits.
 ///
 /// Protocol: one command per line on stdin, one JSON event per line on stdout.
-///   stdin:  sync | sync code | stop | backfill on | backfill off      (EOF = stop)
+///   stdin:  sync | sync code | changed PATH | stop | backfill on | backfill off      (EOF = stop)
+///           [PlutoBar] "changed PATH": something there changed (FSEvents); only those places are synced
+///           (`Indexer.sync(changed:within:)`), not every chosen folder. `--changed PATH` starts with that instead of
+///           a full sync.
 ///   stdout: {"event": "missing" | "pruned" | "sync" | "file" | "rest" | "summary" | "waiting" | "idle" | "error" |
 ///            "exit", ...}; events about the code index say "code": true
 ///
@@ -52,6 +55,10 @@ final class IndexService: @unchecked Sendable {
     private let lock = NSLock()
     private var syncRequested = true       // the first thing it does
     private var codeSyncRequested = true
+    /// Places that changed, for a sync of just them (a full sync, when one's asked for, covers them).
+    private var changedPaths = Set<String>()
+    /// A sync of any kind is waiting (read under `lock`).
+    private var wantsSync: Bool { syncRequested || !changedPaths.isEmpty }
     private var stopRequested = false
     private var backfillAllowed: Bool
     /// A sync asked for while files are being indexed waits until then. A crawl of a big folder can take minutes, and
@@ -61,7 +68,12 @@ final class IndexService: @unchecked Sendable {
     private let wake = DispatchSemaphore(value: 0)
 
     init(main: Part, code: Part?, folder: URL, model: SharedEmbedder, modelReady: @escaping () -> Bool,
-         backfill: Bool, newFilesLimit: Int, linger: Double) {
+         backfill: Bool, newFilesLimit: Int, linger: Double, changed: [String] = []) {
+        if !changed.isEmpty {
+            changedPaths = Set(changed)
+            syncRequested = false
+            codeSyncRequested = false
+        }
         self.main = main
         self.code = code
         self.folder = folder
@@ -103,7 +115,11 @@ final class IndexService: @unchecked Sendable {
         var codeCounted = code == nil
         while true {
             if lock.withLock({ () -> Bool in defer { syncRequested = false }; return syncRequested }) {
+                lock.withLock { changedPaths = [] }
                 sync(main, into: &newFiles)
+            } else if case let paths = lock.withLock({ () -> [String] in defer { changedPaths = [] }; return Array(changedPaths) }),
+                      !paths.isEmpty {
+                sync(main, changed: paths, into: &newFiles)
             }
             // The code folders are crawled with the first sync, so their counts show from the start (a big first pass
             // of the main index takes hours); their files are read once the main index has nothing waiting, below.
@@ -126,7 +142,7 @@ final class IndexService: @unchecked Sendable {
             }
             if (try? main.store.pendingCount()) ?? 0 > 0, lock.withLock({ backfillAllowed }) {
                 guard run(main, only: nil) else { break }
-                if lock.withLock({ syncRequested }) { continue }
+                if lock.withLock({ wantsSync }) { continue }
             }
             // The code index once the main one has nothing waiting: its own sync (code changes come in a while after
             // they settle), what it just queued at once, the rest under the backfill's rules.
@@ -141,14 +157,14 @@ final class IndexService: @unchecked Sendable {
                 }
                 if (try? code.store.pendingCount()) ?? 0 > 0, lock.withLock({ backfillAllowed }) {
                     guard run(code, only: nil) else { break }
-                    if lock.withLock({ syncRequested || codeSyncRequested }) { continue }
+                    if lock.withLock({ wantsSync || codeSyncRequested }) { continue }
                 }
             }
             // Once nothing is waiting: the rest of long PDFs and documents, the same way.
             if lock.withLock({ backfillAllowed }), (try? main.store.pendingCount()) ?? 1 == 0,
                (try? code?.store.pendingCount() ?? 0) ?? 1 == 0, (try? main.store.unfinishedCount().files) ?? 0 > 0 {
                 guard finishLongFiles() else { break }
-                if lock.withLock({ syncRequested || codeSyncRequested }) { continue }
+                if lock.withLock({ wantsSync || codeSyncRequested }) { continue }
             }
             if code != nil, lock.withLock({ codeSyncRequested }) { continue }
             emitCounts("idle")
@@ -168,7 +184,7 @@ final class IndexService: @unchecked Sendable {
     /// New files a run stopped before (a sync or stop came first): kept for the next round. Done: anything still
     /// pending joins the backfill.
     private func left(_ part: Part, of files: Set<Int64>) -> Set<Int64> {
-        let yielded = lock.withLock { syncRequested || stopRequested || (part.code && codeSyncRequested) }
+        let yielded = lock.withLock { wantsSync || stopRequested || (part.code && codeSyncRequested) }
         return yielded ? Set((try? part.store.pending(limit: nil, only: files).map(\.id)) ?? []) : []
     }
 
@@ -208,14 +224,15 @@ final class IndexService: @unchecked Sendable {
         return available
     }
 
-    private func sync(_ part: Part, into newFiles: inout Set<Int64>) {
+    private func sync(_ part: Part, changed: [String]? = nil, into newFiles: inout Set<Int64>) {
         let started = Date()
         defer {
             let took = Date().timeIntervalSince(started)
             lock.withLock { yieldAt = Date() + max(took, 2) }
         }
         do {
-            let summary = try part.indexer.sync(availableRoots(part))
+            let roots = availableRoots(part)
+            let summary = try changed.map { try part.indexer.sync(changed: $0, within: roots) } ?? part.indexer.sync(roots)
             if summary.queued.count <= newFilesLimit { newFiles.formUnion(summary.queued) }
             emitCounts("sync", [
                 "code": part.code,
@@ -223,6 +240,7 @@ final class IndexService: @unchecked Sendable {
                 "added": summary.added, "changed": summary.changed, "moved": summary.moved,
                 "removed": summary.removed, "unchanged": summary.unchanged,
                 "ms": Int(Date().timeIntervalSince(started) * 1000),
+                "partial": changed != nil,
                 "started": started.timeIntervalSince1970,   // the app checks its sync request came before this
             ])
         } catch {
@@ -239,7 +257,7 @@ final class IndexService: @unchecked Sendable {
             let states = try part.indexer.run(only: ids, shouldStop: { [self] in
                 lock.withLock {
                     stopRequested || (!isNew && !backfillAllowed)
-                        || Date() >= yieldAt && (syncRequested || part.code && codeSyncRequested)
+                        || Date() >= yieldAt && (wantsSync || part.code && codeSyncRequested)
                 }
             }, onEvent: { event in
                 emit(["event": "file", "new": isNew, "done": event.done, "total": event.total, "path": event.path,
@@ -265,7 +283,7 @@ final class IndexService: @unchecked Sendable {
             let states = try main.indexer.finishLongFiles(shouldStop: { [self] in
                 lock.withLock {
                     stopRequested || !backfillAllowed
-                        || Date() >= yieldAt && (syncRequested || codeSyncRequested && code != nil)
+                        || Date() >= yieldAt && (wantsSync || codeSyncRequested && code != nil)
                 }
             }, onStep: { step in
                 emit(["event": "rest", "done": step.done, "total": step.total, "files": step.files, "path": step.path,
@@ -287,7 +305,7 @@ final class IndexService: @unchecked Sendable {
         let deadline = DispatchTime.now() + linger
         while wake.wait(timeout: deadline) == .success {
             let (sync, codeSync, stop, backfill) = lock.withLock {
-                (syncRequested, codeSyncRequested, stopRequested, backfillAllowed)
+                (wantsSync, codeSyncRequested, stopRequested, backfillAllowed)
             }
             if stop { return false }
             if sync || codeSync && code != nil { return true }
@@ -302,6 +320,10 @@ final class IndexService: @unchecked Sendable {
     private func readCommands() {
         while let line = readLine() {
             lock.withLock {
+                if line.hasPrefix("changed ") {
+                    changedPaths.insert(String(line.dropFirst("changed ".count)))
+                    return
+                }
                 switch line.trimmingCharacters(in: .whitespaces) {
                 case "sync": syncRequested = true
                 case "sync code": codeSyncRequested = true

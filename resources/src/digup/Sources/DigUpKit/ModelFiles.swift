@@ -17,10 +17,19 @@ public enum ModelFiles {
         public let name: String
         public let bytes: Int64
         public let sha256: String
+        /// [PlutoBar] Where it comes from, when that isn't this repository (the Neural Engine model's files).
+        public let source: URL?
+
+        public init(name: String, bytes: Int64, sha256: String, source: URL? = nil) {
+            self.name = name
+            self.bytes = bytes
+            self.sha256 = sha256
+            self.source = source
+        }
 
         /// Hugging Face's address for this file at the pinned revision (it redirects to a CDN that takes HTTP ranges).
         public var url: URL {
-            URL(string: "https://huggingface.co/\(ModelFiles.repository)/resolve/\(ModelFiles.revision)/\(name)")!
+            source ?? URL(string: "https://huggingface.co/\(ModelFiles.repository)/resolve/\(ModelFiles.revision)/\(name)")!
         }
     }
 

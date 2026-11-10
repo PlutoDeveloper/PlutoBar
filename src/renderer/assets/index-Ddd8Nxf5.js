@@ -59586,6 +59586,7 @@ function shouldRecreateAgentVoiceAudioContextForSourceRate(_0x1550ff, _0x368809,
 function shouldRouteAgentVoicePreviewThroughWebAudio(_0x56be89) {
   return _0x56be89 !== "win32";
 }
+let agentVoiceIdleTimer = null;
 function shouldRecreateAgentVoiceAudioContext(_0x438512) {
   return _0x438512 === "closed" || _0x438512 === "interrupted";
 }
@@ -71879,7 +71880,7 @@ class AudioCapture {
   async ensurePipeline() {
     if (this.pipelineReady && this.audioContext?.state !== "closed") return;
     this.destroyPipeline(), this.audioContext = new AudioContext({ "sampleRate": SAMPLE_RATE, "latencyHint": "interactive" }), this.audioContext.onstatechange = () => {
-      this.audioContext?.state === "suspended" && this.audioContext.resume().catch(() => {
+      this.audioContext?.state === "suspended" && !this.idleSuspended && this.audioContext.resume().catch(() => {
       });
     }, this.workletBlobUrl = createWorkletBlobUrl(), await this.audioContext.audioWorklet.addModule(this.workletBlobUrl), this.workletNode = new AudioWorkletNode(this.audioContext, "recorder-processor"), this.workletNode.port.onmessage = (_0x1bb0ff) => {
       this.handleWorkletChunk(_0x1bb0ff.data);
@@ -71896,11 +71897,27 @@ class AudioCapture {
     this.audioContext && (this.audioContext.close().catch(() => {
     }), this.audioContext = null), this.workletBlobUrl && (URL.revokeObjectURL(this.workletBlobUrl), this.workletBlobUrl = null), this.pipelineReady = false;
   }
+  // [local-runtime] A running AudioContext keeps the output device open
+  // (coreaudiod holds a sleep assertion and the speakers' power). Suspended
+  // after 20 s without a capture; resumed (a few ms) when the next one starts.
+  idleSuspended = false;
+  idleTimer = null;
+  scheduleIdleSuspend() {
+    clearTimeout(this.idleTimer), this.idleTimer = setTimeout(() => {
+      this.idleTimer = null, this.audioContext && this.audioContext.state === "running" && (this.idleSuspended = !false, this.audioContext.suspend().catch(() => {
+      }));
+    }, 2e4);
+  }
+  async wakePipeline() {
+    clearTimeout(this.idleTimer), this.idleTimer = null, this.idleSuspended = false, this.audioContext?.state === "suspended" && await this.audioContext.resume().catch(() => {
+    });
+  }
   async startCapture(_0x1fa09e) {
     const _0x14b70d = ++this.captureGeneration, _0x2ce21f = ++this.currentCaptureId, _0x1ff40c = Date.now();
+    clearTimeout(this.idleTimer), this.idleTimer = null, this.idleSuspended = false;
     this.chunksThisCapture = 0, reportDiag("pill_start_capture_begin", { "captureId": _0x2ce21f, "deviceName": _0x1fa09e, "pipelineReadyAtStart": this.pipelineReady, "audioContextState": this.audioContext?.state ?? null }), this.disconnectSource();
     try {
-      await this.ensurePipeline();
+      await this.ensurePipeline(), await this.wakePipeline();
       if (_0x14b70d !== this.captureGeneration) {
         console.warn("[AudioCapture] Start aborted after ensurePipeline (stop was called)"), reportDiag("pill_start_capture_aborted", { "captureId": _0x2ce21f, "stage": "after_ensure_pipeline", "elapsedMs": Date.now() - _0x1ff40c });
         return;
@@ -71935,7 +71952,7 @@ class AudioCapture {
   stopCapture() {
     this.captureGeneration++;
     const _0x1722cc = this.captureStartTime > 0;
-    _0x1722cc && this.chunksThisCapture === 0 && reportDiag("pill_stop_capture_no_chunks", { "captureId": this.currentCaptureId, "elapsedSinceStartMs": Date.now() - this.captureStartTime }), this.captureStartTime = 0, this.chunksThisCapture = 0, this.disconnectSource();
+    _0x1722cc && this.chunksThisCapture === 0 && reportDiag("pill_stop_capture_no_chunks", { "captureId": this.currentCaptureId, "elapsedSinceStartMs": Date.now() - this.captureStartTime }), this.captureStartTime = 0, this.chunksThisCapture = 0, this.disconnectSource(), this.scheduleIdleSuspend();
   }
   async resolveDeviceId(_0x206499) {
     if (!_0x206499 || _0x206499.toLowerCase() === "default") return undefined;
@@ -76036,6 +76053,7 @@ function useAgentVoicePlayback({ enabled = !false } = {}) {
     }
     _0x5f00ab();
   }, [_0x5f00ab]), _0x1dc4fa = reactExports.useCallback((_0x47940c) => {
+    clearTimeout(agentVoiceIdleTimer), agentVoiceIdleTimer = null;
     const _0x572535 = window.electron?.process?.["platform"] ?? (navigator.platform.startsWith("Win") ? "win32" : undefined), _0x499d43 = _0x3e1d9b.current, _0x189448 = !!_0x499d43 && !!_0x47940c && shouldRecreateAgentVoiceAudioContextForSourceRate(_0x572535, _0x499d43.sampleRate, _0x47940c);
     if (_0x499d43 && _0x4576a4.current && !shouldRecreateAgentVoiceAudioContext(_0x499d43.state) && !_0x189448) return;
     _0x499d43 && (void _0x499d43.close().catch(() => {
@@ -76339,6 +76357,14 @@ function useAgentVoicePlayback({ enabled = !false } = {}) {
     const _0x1ac87e = _0x69718b.current;
     if (_0x1ac87e.length === 0) {
       _0x53e84e();
+      // [local-runtime] Nothing left to say: let the output device go after
+      // 20 s of quiet (a running context keeps the speakers powered).
+      clearTimeout(agentVoiceIdleTimer), agentVoiceIdleTimer = setTimeout(() => {
+        agentVoiceIdleTimer = null;
+        const _0xctx = _0x3e1d9b.current, _0xel = _0x4b4c71.current;
+        _0xctx && _0xctx.state === "running" && _0x571e6f.current.length === 0 && _0x69718b.current.length === 0 && (!_0xel || _0xel.paused || _0xel.ended) && void _0xctx.suspend().catch(() => {
+        });
+      }, 2e4);
       return;
     }
     _0x69718b.current = [];

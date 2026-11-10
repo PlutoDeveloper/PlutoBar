@@ -16,7 +16,8 @@
     "build:ui-control": "scripts/build-ui-control.sh",
     "build:plutobar": "scripts/build-plutobar.sh",
     "build:digup": "scripts/build-digup.sh",
-    "test": "node scripts/dev/backend-harness.js"
+    "test": "node scripts/dev/backend-harness.js",
+    "build:apple-speech": "scripts/build-apple-speech.sh"
   },
   "build": {
     "appId": "com.voiceos.opensourced",

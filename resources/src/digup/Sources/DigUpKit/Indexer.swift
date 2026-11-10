@@ -90,6 +90,73 @@ public final class Indexer {
     public func sync(_ roots: [URL]) throws -> SyncSummary {
         let crawl = Crawler.crawl(roots, options: options)
         let existing = try store.files(under: roots.map { $0.standardizedFileURL.path })
+        return try reconcile(crawl, existing: existing, roots: roots)
+    }
+
+    /// [PlutoBar] Like `sync`, but only where something changed: `paths` as FSEvents reported them (files and folders
+    /// that appeared, changed, moved or went away). A folder there is walked whole; a file means one level of its
+    /// folder. Seconds of crawling every chosen folder become milliseconds for a new screenshot. Paths outside
+    /// `roots`, or inside a folder the crawl would skip, are ignored; more than `limit` places walk everything.
+    public func sync(changed paths: [String], within roots: [URL], limit: Int = 64) throws -> SyncSummary {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser.path
+        // Everything in real spellings, as the index and the crawl have them (/private/tmp, not /tmp).
+        let rootPaths = roots.map { FolderSelection.realPath($0.standardizedFileURL.path) }
+        var deep = Set<String>(), shallow = Set<String>()
+        for raw in paths {
+            let path = Self.realSpelling(URL(fileURLWithPath: raw).standardizedFileURL.path)
+            guard let root = rootPaths.first(where: { path == $0 || FolderSelection.isInside(path, $0) }),
+                  !Self.skipped(path, below: root, home: home, excluded: options.excludedFolders) else { continue }
+            var isFolder: ObjCBool = false
+            let exists = fm.fileExists(atPath: path, isDirectory: &isFolder)
+            if exists, isFolder.boolValue {
+                deep.insert(path)
+            } else {
+                // A file, or something that's gone (a file, or a folder: whatever was indexed under it goes too).
+                if !exists { deep.insert(path) }
+                if path != root { shallow.insert((path as NSString).deletingLastPathComponent) }
+            }
+        }
+        deep = deep.filter { d in !deep.contains { FolderSelection.isInside(d, $0) } }
+        shallow = shallow.filter { s in !deep.contains { s == $0 || FolderSelection.isInside(s, $0) } }
+        if deep.count + shallow.count > limit { return try sync(roots) }
+        let places = (deep.sorted() + shallow.sorted()).map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let crawl = Crawler.crawl(places, options: options, chosen: Set(rootPaths), shallow: shallow)
+        var existing = try store.files(under: Array(deep))
+        for folder in shallow {
+            // Rows hold real paths (/private/tmp where FSEvents may say /tmp).
+            let spellings: Set = [folder, FolderSelection.realPath(folder)]
+            existing += try store.files(under: [folder]).filter { spellings.contains(($0.path as NSString).deletingLastPathComponent) }
+        }
+        return try reconcile(crawl, existing: existing, roots: roots)
+    }
+
+    /// `path` with its nearest existing folder's real path: it may be gone (a folder just deleted).
+    static func realSpelling(_ path: String) -> String {
+        if FileManager.default.fileExists(atPath: path) { return FolderSelection.realPath(path) }
+        let parent = (path as NSString).deletingLastPathComponent
+        guard parent != path, parent.count > 1 else { return path }
+        return (realSpelling(parent) as NSString).appendingPathComponent((path as NSString).lastPathComponent)
+    }
+
+    /// Inside a folder the crawl never enters (hidden, a developer folder, ~/Library, excluded, a package), between
+    /// `root` and `path` (both included, the root itself excepted).
+    static func skipped(_ path: String, below root: String, home: String, excluded: [String]) -> Bool {
+        var folder = path
+        while folder != root, folder.count > root.count {
+            let url = URL(fileURLWithPath: folder)
+            if url.lastPathComponent.hasPrefix(".") { return true }
+            if (try? url.resourceValues(forKeys: [.isPackageKey]))?.isPackage == true { return true }
+            if folder != path || FileManager.default.fileExists(atPath: folder + "/"),
+               Rules.skipReason(forFolder: url, home: home, excluded: excluded) != nil { return true }
+            folder = (folder as NSString).deletingLastPathComponent
+        }
+        return false
+    }
+
+    /// New files are queued, changed ones re-queued, moved ones re-pathed (no re-embedding), and files that are gone
+    /// or newly excluded are removed: `crawl` against what the index had for the same places.
+    private func reconcile(_ crawl: CrawlReport, existing: [FileRecord], roots: [URL]) throws -> SyncSummary {
         var byPath: [String: FileRecord] = [:]
         var byInode: [String: FileRecord] = [:]
         for file in existing {

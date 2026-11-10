@@ -14,6 +14,10 @@ let package = Package(
     products: [
         .executable(name: "digup", targets: ["digup"]),
     ],
+    dependencies: [
+        // [PlutoBar] The Gemma tokenizer for the Neural Engine runtime (AneRuntime).
+        .package(url: "https://github.com/huggingface/swift-transformers", from: "1.0.0"),
+    ],
     targets: [
         // The engine: crawler, extractors, index store, the embedder interface and worker client, search. No UI.
         .target(name: "DigUpKit"),
@@ -21,6 +25,9 @@ let package = Package(
         .systemLibrary(name: "CLlama", path: "Sources/CLlama"),
         .target(name: "LlamaRuntime", dependencies: ["CLlama", "DigUpKit"],
                 linkerSettings: [.unsafeFlags(["-L\(vendor)/llama/lib"])]),
-        .executableTarget(name: "digup", dependencies: ["DigUpKit", "LlamaRuntime"]),
+        // [PlutoBar] EmbeddingGemma 2 on the Apple Neural Engine through Core AI (macOS 27): the ANEMLL conversion's
+        // three towers, with the host side (tokenizer, embedding table, image patches, log-mel) done here.
+        .target(name: "AneRuntime", dependencies: ["DigUpKit", .product(name: "Tokenizers", package: "swift-transformers")]),
+        .executableTarget(name: "digup", dependencies: ["DigUpKit", "LlamaRuntime", "AneRuntime"]),
     ]
 )

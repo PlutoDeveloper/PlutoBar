@@ -1,3 +1,4 @@
+import AneRuntime
 import DigUpKit
 import Foundation
 import LlamaRuntime
@@ -63,10 +64,10 @@ struct Arguments {
     var values: [String: String] = [:]
     var lists: [String: [String]] = [:]
     var flags: Set<String> = []
-    static let valued: Set<String> = ["--index", "--limit", "--kind", "-n", "--zgate", "--word-weight", "--new-limit",
+    static let valued: Set<String> = ["--repeat", "--text", "--image", "--audio", "--index", "--limit", "--kind", "-n", "--zgate", "--word-weight", "--new-limit",
                                       "--linger", "--shot-tokens", "--code-stretch", "--encoder-idle", "--to",
                                       "--memory-limit", "--time-limit", "--tries", "--when-quiet"]
-    static let repeated: Set<String> = ["--exclude", "--exclude-ext", "--code-root", "--code-exclude"]
+    static let repeated: Set<String> = ["--exclude", "--exclude-ext", "--code-root", "--code-exclude", "--changed"]
 
     init(_ raw: ArraySlice<String>) throws {
         var index = raw.startIndex
@@ -201,12 +202,64 @@ func makeEmbedder(textOnly: Bool, log: URL, qos: QualityOfService = .default) th
         config.qos = qos
         return try EmbeddingWorker(config, textOnly: textOnly)
     }
+    // [PlutoBar] The Neural Engine when its model is here (macOS 27), else llama.cpp on the GPU.
+    if usesNeuralEngine(textOnly: textOnly), #available(macOS 27.0, *) {
+        return try AneEmbedder(models: AneModels.installed, textOnly: textOnly)
+    }
     return try LlamaEmbedder(models: try LlamaModels.locate(), textOnly: textOnly, log: log)
 }
 
-/// `makeEmbedder`'s vector source when it's known without starting it: llama.cpp's always is.
+/// [PlutoBar] The Neural Engine runtime is used unless `DIGUP_RUNTIME=llama`, on macOS 27 with its model downloaded.
+/// The choice is the same for indexing and searching, so their vectors always share a source.
+func usesNeuralEngine(textOnly: Bool = false) -> Bool {
+    ProcessInfo.processInfo.environment["DIGUP_RUNTIME"] != "llama" && AneModels.supported
+        && AneModels.installed.complete(textOnly: textOnly)
+}
+
+/// `makeEmbedder`'s vector source when it's known without starting it.
 func embedderSource() -> String? {
-    ProcessInfo.processInfo.environment["DIGUP_WORKER_DIR"] == nil ? LlamaEmbedder.modelInfo.vectorSource : nil
+    guard ProcessInfo.processInfo.environment["DIGUP_WORKER_DIR"] == nil else { return nil }
+    if usesNeuralEngine(), #available(macOS 27.0, *) { return AneEmbedder.modelInfo.vectorSource }
+    return LlamaEmbedder.modelInfo.vectorSource
+}
+
+/// [PlutoBar] `digup ane-embed --text "…" | --image PATH | --audio PATH`: one vector as JSON (for parity checks).
+func aneEmbed(_ args: Arguments) throws {
+    guard #available(macOS 27.0, *) else { throw CLIError("needs macOS 27") }
+    let textOnly = args.values["--image"] == nil && args.values["--audio"] == nil
+    let embedder = try AneEmbedder(models: AneModels.installed, textOnly: textOnly)
+    let started = Date()
+    var vector: [Float]?
+    // --repeat N: the same input N times more, timed apart (CPU per call, for profiling).
+    if let n = args.values["--repeat"].flatMap(Int.init) {
+        let cpu0 = ProcessInfo.processInfo.systemUptime
+        var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
+        let before = Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1e6 + Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1e6
+        for _ in 0..<n {
+            if let text = args.values["--text"] { _ = try embedder.embedTexts([text]) }
+            if let image = args.values["--image"] { _ = try embedder.embedImages([image], budget: 280) }
+            if let audio = args.values["--audio"] { _ = try embedder.embedAudio([audio]) }
+        }
+        getrusage(RUSAGE_SELF, &usage)
+        let after = Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1e6 + Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1e6
+        let wall = ProcessInfo.processInfo.systemUptime - cpu0
+        print(String(format: "%d calls: %.1f ms wall, %.1f ms CPU per call", n, wall * 1000 / Double(n), (after - before) * 1000 / Double(n)))
+        return
+    }
+    if let text = args.values["--text"] {
+        vector = try embedder.embedTexts([text]).first
+    } else if let image = args.values["--image"] {
+        let e = try embedder.embedImages([image], budget: 280)[0]
+        if let error = e.error { throw CLIError(error) }
+        vector = e.vector
+    } else if let audio = args.values["--audio"] {
+        let e = try embedder.embedAudio([audio])[0]
+        if let error = e.error { throw CLIError(error) }
+        vector = e.vector
+    }
+    guard let vector else { throw CLIError("--text, --image or --audio") }
+    emit(["vector": vector, "ms": Int(Date().timeIntervalSince(started) * 1000),
+          "load_s": embedder.info.loadSeconds ?? 0])
 }
 
 func estimate(_ args: Arguments) throws {
@@ -448,10 +501,11 @@ func indexService(_ args: Arguments) throws -> Int32 {
                                                                         roots: codeRoots),
                                folder: args.indexFolder,
                                model: model,
-                               modelReady: { embedderSource() == nil || LlamaModels.complete },
+                               modelReady: { embedderSource() == nil || usesNeuralEngine() || LlamaModels.complete },
                                backfill: args.flags.contains("--backfill"),
                                newFilesLimit: args.values["--new-limit"].flatMap(Int.init) ?? 50,
-                               linger: args.values["--linger"].flatMap(Double.init) ?? 60)
+                               linger: args.values["--linger"].flatMap(Double.init) ?? 60,
+                               changed: args.lists["--changed"] ?? [])
     return service.serve()
 }
 
@@ -731,6 +785,7 @@ do {
     case "worker": exit(workerService(args))
     case "search-service": exit(try searchService(args))
     case "download-model": exit(try downloadModel(args))
+    case "ane-embed": try aneEmbed(args)
     default:
         print(usage)
         exit(2)

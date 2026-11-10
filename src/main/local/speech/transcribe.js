@@ -1,7 +1,9 @@
 "use strict";
-// Speech-to-text, fully on-device: 16-bit PCM → WAV → whisper.cpp (Metal).
+// Speech-to-text, fully on-device: 16-bit PCM → WAV → Apple's speech model
+// (SpeechAnalyzer, Neural Engine; macOS 26+), else whisper.cpp (Metal).
 
 const whisper = require("./whisper");
+const appleSpeech = require("./appleSpeech");
 const { isWhisperModelReady } = require("./models");
 
 const log = require("../log");
@@ -51,11 +53,21 @@ async function transcribe({ pcm, sampleRate = 16000, model, language, vocabulary
   const { durationMs, peak } = analyzePcm(pcm, sampleRate);
   if (durationMs < MIN_SPEECH_MS) throw new SpeechError("CLIENT_AUDIO_TOO_SHORT", "Audio too short");
   if (peak < SILENCE_PEAK) throw new SpeechError("CLIENT_NO_SPEECH_DETECTED", "No speech detected");
-  if (!isWhisperModelReady(model))
-    throw new SpeechError("LOCAL_STT_NOT_CONFIGURED", "The speech model isn't downloaded yet. Download it from the Dashboard or Settings → Speech.");
-
   const started = Date.now();
   let text;
+  if (appleSpeech.available()) {
+    try {
+      text = await appleSpeech.transcribeWav(pcm16ToWav(pcm, sampleRate), { language, vocabulary: ["PlutoBar", "Pluto", "VoiceOS", "Claude", "Claude Code", "Codex", "ChatGPT", ...vocabulary], signal });
+      log.info("[Speech] transcribed " + Math.round(durationMs) + "ms of audio in " + (Date.now() - started) + "ms (Apple, Neural Engine)");
+      if (!text) throw new SpeechError("CLIENT_NO_SPEECH_DETECTED", "No speech detected");
+      return text;
+    } catch (err) {
+      if (err?.name === "AbortError" || err instanceof SpeechError) throw err;
+      log.warn("[Speech] Apple speech failed, using Whisper: " + err.message);
+    }
+  }
+  if (!isWhisperModelReady(model))
+    throw new SpeechError("LOCAL_STT_NOT_CONFIGURED", "The speech model isn't downloaded yet. Download it from the Dashboard or Settings → Speech.");
   try {
     text = await whisper.transcribeWav(pcm16ToWav(pcm, sampleRate), { id: model, language, vocabulary, signal });
   } catch (err) {

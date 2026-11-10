@@ -85,8 +85,23 @@ function spawnWorker() {
   return worker;
 }
 
+// The voice model holds ~400 MB in this process while loaded: it goes after
+// 5 minutes without a spoken reply, and loads again when the next one comes.
+const IDLE_MS = 5 * 60_000;
+let idleTimer = null;
+function touch() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (!worker || jobs.size) return touch();
+    log.info("[LocalTTS] idle: unloading the voice model");
+    worker.terminate();
+  }, IDLE_MS);
+  idleTimer.unref?.();
+}
+
 // Loads (downloading on first use) the Kokoro model.
 function ensureReady() {
+  touch();
   if (ready) return Promise.resolve();
   readyPromise ??= new Promise((resolve, reject) => {
     const w = spawnWorker();
@@ -106,6 +121,7 @@ function ensureReady() {
 }
 
 function synthesize(text, { voice, speed = 1, onChunk }) {
+  touch();
   const id = nextJob++;
   const promise = new Promise((resolve, reject) => {
     jobs.set(id, { resolve, reject, onChunk });
