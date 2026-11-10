@@ -153,5 +153,10 @@
     "@electron/rebuild": "^4.2.0",
     "electron": "^34.0.0",
     "electron-builder": "^25.1.8"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PlutoDeveloper/PlutoBar.git"
+  },
+  "homepage": "https://github.com/PlutoDeveloper/PlutoBar"
 }

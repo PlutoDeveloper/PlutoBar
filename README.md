@@ -2,21 +2,36 @@
 
 A Spotlight-style assistant for macOS (it grew out of VoiceOS). Press ⌥Space and type, or hold a shortcut and talk: it finds apps, actions, your clipboard and your files by what's in them, and otherwise it types what you say into any app, or Claude does things on your Mac, like opening apps, drafting replies, playing music or checking reminders, and answers out loud.
 
-- **Speech and file search run on your Mac.** Whisper large-v3 turbo for speech-to-text, Kokoro for the voice, and DigUp's engine with EmbeddingGemma 2 for finding files by what's in them, all on-device and offline.
+- **Speech and file search run on your Mac, mostly on the Neural Engine.** Apple's own speech model (SpeechAnalyzer) for speech-to-text, with Whisper large-v3 turbo as the fallback; Kokoro for the voice; and DigUp's engine with EmbeddingGemma 2 for finding files by what's in them, running on the Apple Neural Engine through Core AI. All on-device and offline.
 - **Claude is the brain.** It uses the Claude account you're already signed into in Claude Code, or an Anthropic API key.
 - **Nothing goes to the VoiceOS cloud.** Its servers, Supabase and telemetry are all blocked.
+
+## Requirements
+
+- A Mac with Apple Silicon
+- macOS 26 or later; macOS 27 for file search on the Neural Engine (older versions use the GPU)
+- Node.js 20+ and Xcode (for the Swift helpers); CMake only to rebuild llama.cpp or Whisper
+- Claude Code signed in to a Claude plan, or an Anthropic API key
 
 ## Run it
 
 ```bash
 npm install
-npm run build:digup   # once: builds the file-search engine (llama.cpp needs CMake)
 npm run app           # build, sign and open "PlutoBar.app"
+```
+
+The helpers in `resources/bin` come prebuilt. To rebuild them from source:
+
+```bash
+npm run build:digup          # the file-search engine (llama.cpp needs CMake)
+npm run build:plutobar       # the bar, setup and Settings (SwiftUI)
+npm run build:apple-speech   # dictation on Apple's speech model
+npm run build:whisper        # the Whisper fallback
 ```
 
 The first launch opens **setup**, one step at a time like DigUp's:
 
-1. **Welcome:** Get Started downloads the models once (Whisper ~570 MB, the Kokoro voice ~160 MB, the search model 865 MB), shown at the bottom of every later step.
+1. **Welcome:** Get Started downloads the models once (the Kokoro voice ~160 MB; the search model, 1.5 GB for the Neural Engine on macOS 27 or 865 MB for the GPU; Whisper ~570 MB only where Apple's speech model can't be used), shown at the bottom of every later step.
 2. **Permissions:** Microphone and Accessibility.
 3. **Claude:** detects your Claude Code sign-in. **Sign In** opens Anthropic's own sign-in page; or paste an API key.
 4. **Files:** which folders to search, each with how many files it holds and how long its first pass takes; optionally your code. Indexing starts as you continue.
@@ -39,7 +54,7 @@ Other commands: `npm run dist` builds a `.dmg`. `npm run build:whisper` rebuilds
 The original app was a thin client for a VoiceOS cloud server. That server is now replaced by a local one inside the app (`src/main/local/`). It speaks the same protocol, so the pill, history drawer, shortcuts and paste logic all work unchanged.
 
 ```
- hold shortcut ─▶ microphone ─▶ Whisper (on-device, Metal GPU) ─▶ text
+ hold shortcut ─▶ microphone ─▶ Apple speech (Neural Engine) or Whisper ─▶ text
                                                     │
                      dictation ◀────────────────────┤  (optionally tidied by Claude)
                                                     ▼
@@ -116,7 +131,8 @@ src/
       plutobar/          PlutoBar: index.js (routing + rows), digup.js (file search: DigUp's engine),
                          apps.js, actions.js (actions, Shortcuts, calculator), clipboard.js
       agentEvents.js     the assistant's events, as PlutoBar shows them
-      speech/            whisper.js, transcribe.js, tidy.js, tts.js (Kokoro), models.js
+      speech/            transcribe.js, appleSpeech.js (SpeechAnalyzer), whisper.js (fallback),
+                         tidy.js, tts.js (Kokoro), models.js
   preload/             preload.js (original)
   renderer/            original UI (assets/, patches marked "[local-runtime]")
     voiceos/local-ui.js  Dashboard setup card + Settings → Claude / Speech / PlutoBar tabs
@@ -124,7 +140,9 @@ resources/
   bin/                 macOS helper binaries + whisper-server + ui-control
   src/ui-control/      Swift source of the computer-use helper
   src/plutobar/        Swift source of PlutoBar (SwiftUI + Node-API addon): the bar and setup
-  src/digup/           DigUp's search engine (MIT), built into bin/digup by scripts/build-digup.sh
+  src/digup/           DigUp's search engine (MIT), built into bin/digup by scripts/build-digup.sh;
+                       Sources/AneRuntime runs EmbeddingGemma 2 on the Neural Engine (Core AI)
+  src/apple-speech/    Swift source of the dictation helper (SpeechAnalyzer)
   plutobar/            plutobar.node, built by scripts/build-plutobar.sh
   native/              native addons (window corners, location)
   build/               icon, tray icon, entitlements
@@ -133,7 +151,7 @@ scripts/               package-app.sh · build-whisper.sh · build-ui-control.sh
   dev/                 backend-harness.js (`npm test`, no Electron or Claude needed) ·
                        launch-debug.sh + turn.sh + cdp.js (send a request to the running app
                        and print its tool calls and token use) · plutobar.sh (drive PlutoBar)
-docs/                  original build spec
+docs/                  original build spec and the revival playbooks
 ```
 
 ## Where your data lives
@@ -156,3 +174,17 @@ Logs are in `~/Library/Logs/PlutoBar/main.log`; the indexer's in `Search/index.n
 ## Not available offline
 
 These features needed servers that VoiceOS ran, so they're hidden or inactive: cloud connectors on the Apps page (Gmail, Slack, Google Calendar; the local ones like Messages, Mail, Notes, Music and Spotify work), teams, billing, referrals, tutorials, help chat, mobile pairing, the hands-free wake word and auto-update.
+
+## Energy
+
+PlutoBar is a background app, so it's built to stay quiet:
+
+- Search embeddings run on the Neural Engine, not the GPU (about 35 ms per query).
+- Dictation runs in macOS's speech service on the Neural Engine: about 20 MB, no GPU.
+- A changed file is synced on its own (about 250 ms) instead of re-walking every folder (about a minute); a full walk runs at launch and every 2 hours on power.
+- On battery, only new files' names are indexed; reading what's in them waits for power.
+- Audio output is released 20 s after the last sound, and the reply voice unloads after 5 idle minutes.
+
+## License
+
+PlutoBar is released under the [MIT License](LICENSE). It builds on other open-source work, listed with their licenses in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), including [DigUp](https://github.com/ARahim3/DigUp) by Abdur Rahim (MIT).
