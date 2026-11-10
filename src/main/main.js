@@ -126549,7 +126549,8 @@ electron.app.whenReady().then(async () => {
     (appSessionId = crypto$1.randomUUID()),
     initializeLogging());
   let _0x55b407;
-  // [local-runtime] no "move to Applications" prompt — it only served auto-update
+  // [local-runtime] PlutoBar offers to move itself out of the disk image or Downloads (local/index.js).
+  if (localRuntime.offerMoveToApplications()) return;
   if (process.platform === "darwin" && electron.app.isPackaged && !localRuntime.LOCAL_MODE)
     try {
       if (!electron.app.isInApplicationsFolder()) {

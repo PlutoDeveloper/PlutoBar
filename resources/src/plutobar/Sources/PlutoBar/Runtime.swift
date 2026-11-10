@@ -26,6 +26,7 @@ final class PlutoRuntime {
       if parts.first == "key", parts.count > 1 { self?.controller.debugKey(parts[1]) }
       if parts.first == "agent", parts.count > 1 { self?.agentEvent(parts[1]) }
       if parts.first == "setup" { self?.setup.show() }
+      if parts.first == "setupSnapshot", parts.count > 1 { self?.setup.snapshot(to: parts[1]) }
       if parts.first == "settings" { self?.settings.show(pane: parts.count > 1 ? parts[1] : nil) }
       if parts.first == "setupStep", parts.count > 1, let n = Int(parts[1]), let s = SetupModel.Step(rawValue: n) { self?.setup.model.go(to: s) }
     }

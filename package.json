@@ -60,7 +60,12 @@
       "icon": "resources/build/icon.icns",
       "category": "public.app-category.productivity",
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
       ],
       "hardenedRuntime": true,
       "entitlements": "resources/build/entitlements.mac.plist",
@@ -73,7 +78,8 @@
         "NSRemindersFullAccessUsageDescription": "PlutoBar reads and creates reminders when you ask it to.",
         "NSLocationWhenInUseUsageDescription": "PlutoBar uses your location for weather and nearby places when you ask.",
         "NSAppleMusicUsageDescription": "PlutoBar plays, searches and saves music in Apple Music when you ask it to."
-      }
+      },
+      "minimumSystemVersion": "26.0"
     },
     "asar": false,
     "protocols": [
@@ -83,7 +89,33 @@
           "voiceos"
         ]
       }
-    ]
+    ],
+    "dmg": {
+      "title": "PlutoBar",
+      "artifactName": "PlutoBar-${version}.dmg",
+      "background": "resources/build/dmg/background.png",
+      "icon": "resources/build/icon.icns",
+      "iconSize": 100,
+      "iconTextSize": 13,
+      "window": {
+        "width": 660,
+        "height": 420
+      },
+      "contents": [
+        {
+          "x": 180,
+          "y": 205,
+          "type": "file"
+        },
+        {
+          "x": 480,
+          "y": 205,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "format": "ULFO"
+    }
   },
   "pnpm": {
     "onlyBuiltDependencies": [

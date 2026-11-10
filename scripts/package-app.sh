@@ -7,8 +7,9 @@
 #   scripts/package-app.sh --open    build, sign, launch      (npm run app)
 #   scripts/package-app.sh --dmg     build, sign, make a DMG  (npm run dist)
 #
-# Identity: $VOICEOS_SIGN_IDENTITY (name or SHA-1), else the first
-# "Developer ID Application" / "Apple Development" identity in your keychain.
+# Identity: $VOICEOS_SIGN_IDENTITY (name or SHA-1), else "PlutoBar Developer"
+# (self-signed), else the first "Developer ID Application" / "Apple
+# Development" identity in your keychain.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,6 +19,15 @@ OLD_NAME="VoiceOS opensourced"   # its name before PlutoBar
 ENT="resources/build/entitlements.mac.plist"
 
 IDENTITY="${VOICEOS_SIGN_IDENTITY:-}"
+# PlutoBar's own self-signed identity first (scripts/make-signing-identity.sh):
+# no personal details in the app, and the same identity on every build, so
+# macOS keeps Microphone and Accessibility permissions across updates.
+if [[ -z "$IDENTITY" ]]; then
+  IDENTITY="$(security find-identity -p codesigning | grep '"PlutoBar Developer"' | head -1 | awk '{print $2}' || true)"
+fi
+if [[ -z "$IDENTITY" ]]; then
+  IDENTITY="$(security find-identity -v -p codesigning | grep -E '"Developer ID Application:' | head -1 | awk '{print $2}' || true)"
+fi
 if [[ -z "$IDENTITY" ]]; then
   IDENTITY="$(security find-identity -v -p codesigning | grep -E '"(Developer ID Application|Apple Development):' | head -1 | awk '{print $2}' || true)"
 fi

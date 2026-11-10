@@ -1,4 +1,32 @@
-# PlutoBar
+<p align="center">
+  <img src="resources/build/dmg/icon.png" width="128" height="128" alt="PlutoBar icon">
+</p>
+
+<h1 align="center">PlutoBar</h1>
+
+<p align="center"><b>Search it. Ask it. Done.</b></p>
+
+<p align="center">
+  <a href="https://github.com/PlutoDeveloper/PlutoBar/releases/latest/download/PlutoBar.dmg">
+    <img src="https://img.shields.io/badge/Download%20for%20Mac-000000?style=for-the-badge&logo=apple&logoColor=white" height="44" alt="Download for Mac">
+  </a>
+</p>
+
+<p align="center">
+  Apple Silicon · macOS 26 or later ·
+  <a href="https://github.com/PlutoDeveloper/PlutoBar/releases/latest">Release notes</a>
+</p>
+
+## Install
+
+1. **Download** `PlutoBar.dmg` with the button above and open it.
+2. **Drag PlutoBar into Applications.** Opened straight from the disk image or Downloads, PlutoBar offers to move itself.
+3. **Open it.** PlutoBar is signed with its own certificate, not notarized by Apple, so the first time macOS may say it can't verify it. Go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**. You only do this once.
+4. **Setup takes it from there:** permissions, Claude, the folders to search and your shortcut, one step at a time, while the models download in the background.
+
+Then press **⌥ Space** anywhere.
+
+## What it is
 
 A Spotlight-style assistant for macOS (it grew out of VoiceOS). Press ⌥Space and type, or hold a shortcut and talk: it finds apps, actions, your clipboard and your files by what's in them, and otherwise it types what you say into any app, or Claude does things on your Mac, like opening apps, drafting replies, playing music or checking reminders, and answers out loud.
 
@@ -6,14 +34,16 @@ A Spotlight-style assistant for macOS (it grew out of VoiceOS). Press ⌥Space a
 - **Claude is the brain.** It uses the Claude account you're already signed into in Claude Code, or an Anthropic API key.
 - **Nothing goes to the VoiceOS cloud.** Its servers, Supabase and telemetry are all blocked.
 
-## Requirements
+## Build from source
+
+### Requirements
 
 - A Mac with Apple Silicon
 - macOS 26 or later; macOS 27 for file search on the Neural Engine (older versions use the GPU)
 - Node.js 20+ and Xcode (for the Swift helpers); CMake only to rebuild llama.cpp or Whisper
 - Claude Code signed in to a Claude plan, or an Anthropic API key
 
-## Run it
+### Run it
 
 ```bash
 npm install
@@ -47,7 +77,7 @@ Run it again from the menu bar icon (Set Up PlutoBar…) or Settings → PlutoBa
 
 > **Use `npm run app`, not `npm run dev`, for real use.** macOS ties Microphone and Accessibility permissions to a signed app. `npm run dev` runs as the generic "Electron" binary, so permissions don't stick. `npm run app` signs the build with your Apple Development certificate, so permissions survive rebuilds. `npm run dev` is still handy for quick code changes.
 
-Other commands: `npm run dist` builds a `.dmg`. `npm run build:whisper` rebuilds the Whisper engine from source. `npm run build:ui-control` rebuilds the Accessibility helper behind computer use.
+Other commands: `npm run dist` builds the `.dmg` (its window art comes from `scripts/brand/render-dmg.swift`). Builds are signed with a self-signed "PlutoBar Developer" identity; `scripts/make-signing-identity.sh` creates yours. Set `VOICEOS_SIGN_IDENTITY` to sign with a Developer ID instead. `npm run build:whisper` rebuilds the Whisper engine from source. `npm run build:ui-control` rebuilds the Accessibility helper behind computer use.
 
 ## How it works
 

@@ -10,6 +10,7 @@
 // on top of the state and IPC defined here.
 
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const electron = require("electron");
 const { installNetworkGuard } = require("./networkGuard");
@@ -621,8 +622,40 @@ function localRoutes() {
   ];
 }
 
+// Opened from the disk image, Downloads, or macOS's quarantine copy
+// (App Translocation): PlutoBar offers to move itself into Applications and
+// reopens from there, so it keeps working after the disk image is ejected and
+// can open at login. True when it's moving (the app relaunches).
+function offerMoveToApplications() {
+  const app = electron.app;
+  if (process.platform !== "darwin" || !app.isPackaged) return false;
+  const where = app.getPath("exe");
+  const fromDisk = where.startsWith("/Volumes/");
+  const loose = fromDisk || where.includes("/AppTranslocation/") || where.startsWith(path.join(os.homedir(), "Downloads") + "/");
+  if (!loose || app.isInApplicationsFolder()) return false;
+  const choice = electron.dialog.showMessageBoxSync({
+    message: "Move PlutoBar to Applications?",
+    detail: (fromDisk ? "It's running from the disk image." : "It's running from your Downloads.") +
+      " In Applications it keeps working after that's gone, opens at login, and updates in place.",
+    buttons: ["Move to Applications", "Not Now"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (choice !== 0) return false;
+  try {
+    return app.moveToApplicationsFolder({
+      conflictHandler: (kind) => kind === "existsAndRunning" ? false : true,
+    });
+  } catch (err) {
+    log.warn("[PlutoBar] couldn't move to Applications: " + err.message);
+    electron.dialog.showMessageBoxSync({ type: "warning", message: "PlutoBar couldn't move itself", detail: "Drag it from the disk image into Applications, then open it from there." });
+    return false;
+  }
+}
+
 module.exports = {
   LOCAL_MODE: true,
+  offerMoveToApplications,
   installEarly,
   attachStore,
   seedIdentity: () => identity.seed(),

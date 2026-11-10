@@ -22,6 +22,13 @@ final class SetupController: NSObject, NSWindowDelegate {
 
   func close() { window?.close() }
 
+  /// scripts/dev: the window as it looks now, into a PNG (no screen recording needed).
+  func snapshot(to path: String) {
+    guard let view = window?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+    view.cacheDisplay(in: view.bounds, to: rep)
+    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+  }
+
   private func makeWindow() -> NSWindow {
     let window = NSWindow(
       contentRect: NSRect(origin: .zero, size: SetupView.size),
@@ -93,9 +100,16 @@ final class SetupModel: ObservableObject {
       speechText = s["text"] as? String ?? ""
     }
     if let p = o["permissions"] as? [String: Any] {
+      let wasReady = permissionsReady
       microphone = p["microphone"] as? String ?? microphone
       accessibility = p["accessibility"] as? String ?? accessibility
       packaged = p["packaged"] as? Bool ?? packaged
+      // Both granted while you're on that step: a beat to see the checkmarks, then on.
+      if !wasReady, permissionsReady, step == .permissions {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+          if self?.step == .permissions { self?.go(to: .claude) }
+        }
+      }
     }
     if let c = o["claude"] as? [String: Any] {
       claudeInstalled = c["installed"] as? Bool ?? false
@@ -324,14 +338,20 @@ private func symbol(_ name: String) -> AnyView {
 }
 
 private struct WelcomeStep: View {
+  @State private var shown = 0   // 0 nothing, 1 the bar, 2 the name, 3 the rest
+
   var body: some View {
     VStack(spacing: 0) {
-      Image(nsImage: NSApp.applicationIconImage)
-        .resizable()
-        .frame(width: 104, height: 104)
-        .shadow(color: PlutoGlow.colors[0].opacity(0.4), radius: 16, y: 6)
-      Text("PlutoBar").font(.system(size: 30, weight: .bold)).padding(.top, 8)
-      Text("Search it. Ask it. Done.").font(.system(size: 16)).foregroundStyle(.secondary).padding(.top, 2)
+      WelcomeBar()
+        .scaleEffect(shown >= 1 ? 1 : 0.86)
+        .opacity(shown >= 1 ? 1 : 0)
+        .blur(radius: shown >= 1 ? 0 : 8)
+      Group {
+        Text("PlutoBar").font(.system(size: 34, weight: .bold)).padding(.top, 26)
+        Text("Search it. Ask it. Done.").font(.system(size: 16)).foregroundStyle(.secondary).padding(.top, 2)
+      }
+      .opacity(shown >= 2 ? 1 : 0)
+      .offset(y: shown >= 2 ? 0 : 10)
       VStack(alignment: .leading, spacing: 16) {
         Feature(icon: symbol("magnifyingglass"), title: "Find anything",
                 example: "apps, actions, your clipboard, and files by what's in them: “a dog on the beach”")
@@ -340,18 +360,71 @@ private struct WelcomeStep: View {
         Feature(icon: symbol("mic"), title: "Or just say it",
                 example: "hold your voice shortcut and talk, or type into any app by voice")
       }
-      .padding(.top, 30)
+      .padding(.top, 26)
+      .opacity(shown >= 3 ? 1 : 0)
+      .offset(y: shown >= 3 ? 0 : 14)
       HStack(alignment: .top, spacing: 12) {
         Image(systemName: "lock.shield").font(.system(size: 18)).foregroundStyle(.secondary).frame(width: 30)
-        Text("Speech, Pluto's voice and file search all run on this Mac: PlutoBar downloads their models once "
-          + "(about 1.6 GB). Nothing you index ever leaves your Mac; only what you ask Pluto goes to Claude.")
+        Text("Search, speech and Pluto's voice run on this Mac, mostly on its Neural Engine. Nothing you index "
+          + "ever leaves your Mac; only what you ask Pluto goes to Claude.")
           .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
       }
-      .padding(.top, 26)
+      .padding(.top, 22)
       .frame(maxWidth: 480, alignment: .leading)
+      .opacity(shown >= 3 ? 1 : 0)
     }
     .frame(maxWidth: .infinity)
-    .padding(.bottom, 30)
+    .padding(.bottom, 20)
+    .onAppear {
+      withAnimation(.spring(response: 0.7, dampingFraction: 0.8)) { shown = 1 }
+      withAnimation(.easeOut(duration: 0.5).delay(0.45)) { shown = 2 }
+      withAnimation(.easeOut(duration: 0.55).delay(0.8)) { shown = 3 }
+    }
+  }
+}
+
+/// The bar itself, alive: Pluto's glow running around it while it types what you might ask.
+private struct WelcomeBar: View {
+  private let phrases = ["a dog on the beach", "what's on my calendar today?", "zebra in a video", "remind me to call mom at 6"]
+  @State private var typed = ""
+  @State private var running = true
+
+  var body: some View {
+    HStack(spacing: 12) {
+      PlutoOrb().frame(width: 26, height: 26)
+      HStack(spacing: 1) {
+        Text(typed.isEmpty ? " " : typed).font(.system(size: 19, weight: .regular))
+        Rectangle().fill(Color.accentColor).frame(width: 2, height: 22)
+          .opacity(running ? 1 : 0)
+      }
+      Spacer(minLength: 0)
+    }
+    .padding(.horizontal, 18)
+    .frame(width: 400, height: 58)
+    .background(Capsule().fill(.regularMaterial))
+    .overlay(PlutoGlow(active: true, level: 0.35))
+    .shadow(color: PlutoGlow.colors[0].opacity(0.35), radius: 22, y: 8)
+    .task { await typeForever() }
+    .onDisappear { running = false }
+  }
+
+  private func typeForever() async {
+    try? await Task.sleep(for: .milliseconds(700))
+    var i = 0
+    while running, !Task.isCancelled {
+      let phrase = phrases[i % phrases.count]
+      for ch in phrase {
+        typed.append(ch)
+        try? await Task.sleep(for: .milliseconds(Int.random(in: 45...95)))
+      }
+      try? await Task.sleep(for: .milliseconds(1500))
+      while !typed.isEmpty, !Task.isCancelled {
+        typed.removeLast()
+        try? await Task.sleep(for: .milliseconds(22))
+      }
+      try? await Task.sleep(for: .milliseconds(300))
+      i += 1
+    }
   }
 }
 
@@ -634,9 +707,19 @@ private struct ReadyStep: View {
     ("sparkles", "what's on my calendar today?", "asks Pluto"),
   ]
 
+  @State private var burst = false
+
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
-      StepTitle(title: "You're all set", subtitle: "A few things to try. ⌘1–⌘4 browse Applications, Files, Actions and Clipboard.")
+      VStack(alignment: .leading, spacing: 6) {
+        Text("You're all set")
+          .font(.system(size: 28, weight: .bold))
+          .foregroundStyle(LinearGradient(colors: [PlutoGlow.colors[0], PlutoGlow.colors[3], PlutoGlow.colors[4]],
+                                          startPoint: .leading, endPoint: .trailing))
+        Text("Press \(label(model.shortcut)) anywhere and try one of these. ⌘1–⌘4 browse Applications, Files, Actions and Clipboard.")
+          .font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
       VStack(spacing: 8) {
         ForEach(tips, id: \.1) { icon, query, result in
           HStack(spacing: 12) {
@@ -658,5 +741,28 @@ private struct ReadyStep: View {
       }
       .toggleStyle(.switch)
     }
+    .background(alignment: .topLeading) {
+      // A burst of Pluto's glow as you arrive.
+      ZStack {
+        ForEach(0..<6, id: \.self) { i in
+          Circle()
+            .fill(PlutoGlow.colors[i].opacity(0.3))
+            .frame(width: 60, height: 60)
+            .blur(radius: 26)
+            .offset(x: burst ? cos(Double(i) * .pi / 3) * 170 : 0, y: burst ? sin(Double(i) * .pi / 3) * 90 : 0)
+            .scaleEffect(burst ? 2.2 : 0.3)
+        }
+      }
+      .frame(width: 10, height: 10)
+      .offset(x: 120, y: 20)
+      .opacity(burst ? 0 : 1)
+      .allowsHitTesting(false)
+    }
+    .onAppear { withAnimation(.easeOut(duration: 1.6)) { burst = true } }
+  }
+
+  private func label(_ accel: String) -> String {
+    ["Command+Space": "⌘ Space", "Alt+Space": "⌥ Space", "Control+Alt+Space": "⌃⌥ Space",
+     "Command+Shift+Space": "⇧⌘ Space"][accel] ?? accel
   }
 }
