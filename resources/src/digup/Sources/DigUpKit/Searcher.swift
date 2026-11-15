@@ -186,6 +186,16 @@ public final class Searcher {
             if let kind = fileKind[file], hinted.contains(kind) { score += 1 }
             scored[file] = score
         }
+        // [PlutoBar] A file whose own name holds every word typed is what a launcher should show first, the way
+        // Spotlight does. Otherwise a file the model can't read (an .mkv AVFoundation can't open) matched on its name
+        // alone (≤ 2) and lost to anything that looked a bit like the words (z 5–6): "iron man 2" missed
+        // "Iron Man 2.mkv" (2026-11-15).
+        if !isCode, !terms.isEmpty {
+            for (file, bonus) in try nameBonuses(text, terms: terms, among: coverage.filter { $0.value >= 1 }.keys,
+                                                 prefixLast: prefixLast) {
+                scored[file, default: wordsWeight] += bonus
+            }
+        }
 
         let wordRank = Dictionary(words.enumerated().map { ($0.element.file, ($0.offset + 1, $0.element)) },
                                   uniquingKeysWith: { first, _ in first })
@@ -275,6 +285,32 @@ public final class Searcher {
     /// embedding but everything to keyword search: a query made of them weighs words double and meaning half. Numbers
     /// count since 2026-10-09, when text of digits lost its vectors (`SearchText.hasWords`): a number in a data dump fell
     /// below unrelated meaning matches.
+    /// Files among `files` whose name (not their folders or contents) has every one of the query's words: 4, + up to
+    /// 2 the more of the name the query covers, + 1 when the short words ("2" in "iron man 2") are in the name too.
+    private func nameBonuses(_ text: String, terms: [String], among files: Dictionary<Int64, Double>.Keys,
+                             prefixLast: Bool) throws -> [Int64: Double] {
+        guard !files.isEmpty else { return [:] }
+        let tokens = { (string: String) -> [String] in
+            SearchText.normalized(string).lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }
+        }
+        let typed = tokens(text)
+        var bonuses: [Int64: Double] = [:]
+        try store.db.query("SELECT id, path FROM files WHERE id IN (\(files.map(String.init).joined(separator: ",")))") {
+            let name = ((($0.text(1) ?? "") as NSString).lastPathComponent as NSString).deletingPathExtension
+            let words = tokens(name)
+            let has = { (term: String, last: Bool) in
+                words.contains { $0 == term || ((prefixLast && last) || term.count >= 3) && $0.hasPrefix(term) }
+            }
+            guard terms.enumerated().allSatisfy({ has($1, $0 == terms.count - 1) }) else { return }
+            let named = Set(words.filter { $0.count >= 2 && !Self.stopwords.contains($0) }).count
+            var bonus = 4 + 2 * min(1, Double(terms.count) / Double(max(named, 1)))
+            if typed.enumerated().allSatisfy({ has($1, $0 == typed.count - 1) }) { bonus += 1 }
+            bonuses[$0.int(0)] = bonus
+        }
+        return bonuses
+    }
+
     static func isLookup(_ terms: [String]) -> Bool {
         !terms.isEmpty && terms.allSatisfy {
             $0.contains(where: \.isNumber) && ($0.contains(where: \.isLetter) || $0.count >= 4)
